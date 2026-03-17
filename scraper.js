@@ -1,46 +1,60 @@
 const axios = require('axios');
 
+// دالة لجلب قائمة ترجمات بدلاً من واحدة فقط
 async function fetchAllPossibleSubs(imdbId) {
-    console.log(`[SCRAPER] جاري البحث عن كافة الترجمات المتاحة لـ: ${imdbId}`);
+    console.log(`[SCRAPER] جاري البحث عن كافة الترجمات لـ: ${imdbId}`);
     
     try {
-        // هنا نضع الكود الخاص بجلب البيانات من OpenSubtitles أو SubDL
-        // ملاحظة: تأكد من استخدام الـ API Key الخاص بك إذا لزم الأمر
+        // تنظيف الـ ID
+        const id = imdbId.replace('tt', '');
         
-        // مثال لمحاكاة جلب نتائج متعددة (يجب ربطه بـ API حقيقي)
-        // سنفترض أننا نجلب البيانات ونقوم بتنظيفها
-        
-        let results = [];
+        // مثال باستخدام OpenSubtitles (تأكد من إعداد الـ API Key الخاص بك في Environment Variables)
+        const response = await axios.get(`https://api.opensubtitles.com/api/v1/subtitles`, {
+            params: {
+                imdb_id: id,
+                languages: 'ar'
+            },
+            headers: {
+                'Api-Key': process.env.OPENSUBTITLES_API_KEY, // تأكد من إضافة هذا في رندر
+                'User-Agent': 'StremioArabic v1.0'
+            }
+        });
 
-        // مثال لجلب البيانات من مصدر (كمثال توضيحي):
-        // const response = await axios.get(`https://api.example.com/subs/${imdbId}`);
-        
-        // المحاكاة لنتائج البحث (يجب استبدالها بمنطق الجلب الفعلي لديك):
-        // results = response.data.map(item => ({
-        //    content: item.srt_content, 
-        //    releaseName: item.release_name,
-        //    source: "OpenSubtitles"
-        // }));
+        if (response.data && response.data.data.length > 0) {
+            // جلب أول 5 نتائج للمزامنة
+            const subEntries = response.data.data.slice(0, 5);
+            
+            let results = [];
+            for (let entry of subEntries) {
+                // جلب رابط التحميل الفعلي لكل ملف
+                const downloadLink = await axios.post(`https://api.opensubtitles.com/api/v1/download`, 
+                { file_id: entry.attributes.files[0].file_id },
+                {
+                    headers: {
+                        'Api-Key': process.env.OPENSUBTITLES_API_KEY,
+                        'Content-Type': 'application/json'
+                    }
+                });
 
-        // مؤقتاً وللتجربة، إذا كان السكرابر القديم يعمل بـ fetchSubs:
-        // يمكنك تحويل النتيجة الفردية إلى مصفوفة ليعمل الكود
-        /*
-        const singleSub = await fetchSubs(imdbId); 
-        if (singleSub) {
-            results.push({
-                content: singleSub.araRaw || singleSub.text,
-                releaseName: "Default Sync",
-                source: singleSub.source
-            });
+                // جلب نص الترجمة (SRT)
+                const srtContent = await axios.get(downloadLink.data.link);
+
+                results.push({
+                    content: srtContent.data,
+                    releaseName: entry.attributes.release || entry.attributes.feature_details.title,
+                    source: "OpenSubtitles V3"
+                });
+            }
+            return results;
         }
-        */
-
-        return results; 
     } catch (e) {
         console.error(`[SCRAPER-ERROR] فشل الجلب: ${e.message}`);
+        
+        // حالة طوارئ: إذا فشل الـ API المتقدم، نستخدم السكرابر البسيط القديم (إذا كان متاحاً)
         return [];
     }
+    return [];
 }
 
-// السطر الأهم لحل الخطأ: تصدير الوظيفة بالاسم الصحيح
+// السطر الذي يحل مشكلة الـ Missing Function
 module.exports = { fetchAllPossibleSubs };
