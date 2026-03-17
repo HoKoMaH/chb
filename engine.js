@@ -1,44 +1,45 @@
 const scraper = require('./scraper');
 const mongoose = require('mongoose');
 
-// تعريف الموديل لضمان استخدامه للحفظ
-const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', new mongoose.Schema({
-    imdbId: String,
-    arabicText: String,
-    source: String,
-    createdAt: { type: Date, expires: '7d', default: Date.now }
-}));
+const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle');
 
 async function getSyncedSubtitles(imdbId) {
     try {
-        console.log(`[ENGINE] جاري معالجة الطلب لـ: ${imdbId}`);
+        console.log(`[ENGINE] جاري البحث عن خيارات متعددة لـ: ${imdbId}`);
 
-        // 1. البحث في الكاش أولاً لتوفير الوقت
-        const cached = await Subtitle.findOne({ imdbId });
-        if (cached) {
-            console.log(`[CACHE] تم العثور على الترجمة في القاعدة.`);
-            return { source: cached.source };
-        }
+        // طلب قائمة بكل الترجمات المتاحة من السكرابر
+        const allSubs = await scraper.fetchAllPossibleSubs(imdbId);
 
-        // 2. إذا لم تكن موجودة، نجلبها من السكرابر
-        const subData = await scraper.fetchSubs(imdbId);
-
-        if (subData && subData.araRaw) {
-            // 3. --- الخطوة الأهم: الحفظ في المونجو ---
-            const newSub = new Subtitle({
-                imdbId: imdbId,
-                arabicText: subData.araRaw,
-                source: subData.source
-            });
-            await newSub.save();
+        if (allSubs && allSubs.length > 0) {
+            let results = [];
             
-            console.log(`[DB] تم حفظ الترجمة بنجاح في MongoDB.`);
-            return { source: subData.source };
+            // نأخذ أول 5 نتائج (الأكثر دقة عادة)
+            for (let i = 0; i < Math.min(allSubs.length, 5); i++) {
+                const sub = allSubs[i];
+                const fileId = `${imdbId}_v${i + 1}`; // توليد ID فريد لكل نسخة
+
+                // حفظ في القاعدة إذا لم تكن موجودة
+                const exists = await Subtitle.findOne({ fileId });
+                if (!exists) {
+                    await new Subtitle({
+                        fileId: fileId,
+                        imdbId: imdbId,
+                        arabicText: sub.content,
+                        label: sub.releaseName || `نسخة مزمّنة ${i + 1}`
+                    }).save();
+                }
+
+                results.push({
+                    fileId: fileId,
+                    label: sub.releaseName || `Option ${i + 1}`
+                });
+            }
+            return results;
         }
     } catch (e) {
         console.error(`[ENGINE-ERROR] ${e.message}`);
     }
-    return null;
+    return [];
 }
 
 module.exports = { getSyncedSubtitles };
