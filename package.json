@@ -1,9 +1,16 @@
 {
+  "name": "stremio-arabic-auto-sync",
+  "version": "1.0.0",
+  "description": "Arabic Auto-Sync Addon",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
   "dependencies": {
     "stremio-addon-sdk": "latest",
     "mongoose": "^8.0.0",
     "axios": "^1.6.0",
-    "srt-parser-2": "^1.2.2",
-    "adm-zip": "^0.5.10" 
+    "adm-zip": "^0.5.10",
+    "srt-parser-2": "^1.2.2"
   }
 }
