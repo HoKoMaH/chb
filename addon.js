@@ -23,7 +23,7 @@ builder.defineSubtitlesHandler(async (args) => {
 
         if (subtitleData) {
             // تأكد من استبدال الاسم أدناه باسم مشروعك في رندر
-            const domain = process.env.RENDER_EXTERNAL_HOSTNAME || "your-app-name.onrender.com";
+            const domain = process.env.RENDER_EXTERNAL_HOSTNAME || "https://chb-gy3n.onrender.com";
             const subUrl = `https://${domain}/sub/${id}.srt`;
 
             console.log(`[STREMIO] إرسال رابط الترجمة: ${subUrl}`);
