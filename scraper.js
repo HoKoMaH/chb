@@ -2,10 +2,10 @@ const axios = require('axios');
 const AdmZip = require('adm-zip');
 const { translate } = require('@vitalets/google-translate-api');
 
-// دالة الترجمة (نفس المنطق السابق مع تحسين السرعة)
+// دالة لترجمة النصوص مع الحفاظ على التوقيت (Batching)
 async function translateSrt(englishSrt) {
     if (!englishSrt) return null;
-    console.log("[TRANSLATOR] 🤖 بدء ترجمة الملف الإنجليزي المطابق...");
+    console.log("[TRANSLATOR] 🤖 بدء ترجمة نسخة مطابقة للتوقيت...");
     const lines = englishSrt.split('\n');
     let batchTexts = [];
     let batchIndices = [];
@@ -36,40 +36,36 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
     const [imdbId, season, episode] = fullId.split(':');
     let results = [];
 
-    console.log(`[SCRAPER] 🎯 هدف البحث: ${videoFileName}`);
+    // استخراج الوسوم الفنية من اسم الملف (مثلاً: BluRay, WEB-DL, NF, YTS, PSA)
+    const technicalTags = (videoFileName || "").toUpperCase().match(/(BLURAY|WEB-DL|NF|WEBrip|BRRIP|YTS|PSA|AMZN|DSNP|H264|H265)/g) || [];
+    console.log(`[SYNC-LOG] 🎯 الوسوم المكتشفة في فيلمك: ${technicalTags.join(', ')}`);
 
     try {
         let baseUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${API_KEY}`;
         if (season) baseUrl += `&season=${season}&episode=${episode}`;
 
-        // 1. فحص العربية أولاً (كما طلبنا دائماً)
+        // 1. البحث عن العربية أولاً
         const arRes = await axios.get(`${baseUrl}&languages=ar`).catch(() => null);
         if (arRes?.data?.subtitles?.length > 0) {
-            console.log(`[SCRAPER] ✨ وجدنا ترجمة عربية جاهزة.`);
             results = await processSubs(arRes.data.subtitles.slice(0, 2), "Original");
         } 
 
-        // 2. إذا لم نجد عربي، نبحث عن "إنجليزي مطابق تماماً" لاسم الملف
+        // 2. إذا لم نجد عربي، نبحث عن الإنجليزي "الأكثر مطابقة فنية"
         if (results.length === 0) {
-            console.log(`[SCRAPER] 🔍 لم نجد عربي. جاري البحث عن نسخة إنجليزية مطابقة لـ: ${videoFileName}`);
+            console.log(`[SYNC-SEARCH] 🔍 البحث عن ترجمة إنجليزية مطابقة للتوقيت...`);
             const enRes = await axios.get(`${baseUrl}&languages=en`).catch(() => null);
 
             if (enRes?.data?.subtitles?.length > 0) {
-                // فلترة النتائج للبحث عن الاسم المطابق
-                const videoLower = videoFileName.toLowerCase();
-                let bestEnSub = enRes.data.subtitles.find(sub => {
-                    const subLabel = sub.release_name.toLowerCase();
-                    // نتحقق من وجود الكلمات الأساسية (مثل PSA أو YTS) في اسم الترجمة
-                    return videoLower.includes(subLabel) || subLabel.includes(videoLower.split('.')[0]);
+                // ترتيب الترجمات الإنجليزية بناءً على عدد الوسوم المشتركة مع ملف الفيديو
+                const sortedEnSubs = enRes.data.subtitles.sort((a, b) => {
+                    const scoreA = technicalTags.filter(tag => a.release_name.toUpperCase().includes(tag)).length;
+                    const scoreB = technicalTags.filter(tag => b.release_name.toUpperCase().includes(tag)).length;
+                    return scoreB - scoreA;
                 });
 
-                // إذا لم نجد مطابقاً تماماً، نأخذ أول نتيجة إنجليزية كحل أخير
-                if (!bestEnSub) {
-                    console.log("[SCRAPER] ⚠️ لم نجد نسخة مطابقة 100%، سنستخدم أفضل نسخة متوفرة.");
-                    bestEnSub = enRes.data.subtitles[0];
-                }
+                const bestEnSub = sortedEnSubs[0];
+                console.log(`[SYNC-SUCCESS] 🏆 تم اختيار النسخة الأقرب للمزامنة: ${bestEnSub.release_name}`);
 
-                console.log(`[SCRAPER-AI] 🤖 البدء بترجمة النسخة الإنجليزية: ${bestEnSub.release_name}`);
                 const enSrt = await downloadAndUnzip(bestEnSub.url);
                 const translatedAr = await translateSrt(enSrt);
                 
@@ -82,11 +78,11 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
                 }
             }
         }
-    } catch (e) { console.error(`[SCRAPER-CRITICAL] ❌ ${e.message}`); }
+    } catch (e) { console.error(`[SCRAPER-ERROR] ❌ ${e.message}`); }
     return results;
 }
 
-// الدوال المساعدة للتحميل والمعالجة (تبقى كما هي)
+// الدوال المساعدة للتحميل
 async function downloadAndUnzip(subUrl) {
     const res = await axios.get(`https://dl.subdl.com${subUrl}`, { responseType: 'arraybuffer' });
     const zip = new AdmZip(Buffer.from(res.data));
