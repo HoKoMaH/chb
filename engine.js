@@ -1,38 +1,31 @@
-// حذفنا السطر الأول القديم const parser = require...
+const scraper = require('./scraper');
+// افترضنا وجود موديل للمونجو هنا لتخزين الكاش
+// const SubtitleModel = require('./models/subtitle'); 
 
-async function syncSrt(arabicSrt, englishSrt) {
+async function getSyncedSubtitles(imdbId) {
     try {
-        // استيراد المكتبة بشكل ديناميكي لتجنب خطأ ERR_REQUIRE_ESM
-        const { default: Parser } = await import("srt-parser-2");
-        const srt = new Parser();
+        console.log(`[ENGINE] جاري معالجة الطلب لـ: ${imdbId}`);
 
-        const ara = srt.fromSrt(arabicSrt);
-        const eng = srt.fromSrt(englishSrt);
-        
-        if (!ara.length || !eng.length) return arabicSrt;
+        // 1. محاولة جلب الترجمة من السكرابر
+        const subData = await scraper.fetchSubs(imdbId);
 
-        const offset = timeToMs(eng[0].startTime) - timeToMs(ara[0].startTime);
-
-        const synced = ara.map(line => ({
-            ...line,
-            startTime: msToTime(timeToMs(line.startTime) + offset),
-            endTime: msToTime(timeToMs(line.endTime) + offset)
-        }));
-
-        return srt.toSrt(synced);
-    } catch (e) { 
-        console.error("Sync Engine Error:", e);
-        return arabicSrt; 
+        if (subData) {
+            // هنا نقوم بصياغة الرابط الذي سيقرأه Stremio
+            // إذا كنت تستخدم سيرفر وسيط لتحويل الملف، نضع الرابط هنا
+            // للتبسيط، سنفترض أننا سنرسل رابط الملف المستخرج
+            
+            return {
+                proxyUrl: `https://your-app-url.onrender.com/sub/${imdbId}.srt`, // هذا المسار يجب أن يكون معرفاً في index.js
+                source: subData.source,
+                label: "Arabic Synced"
+            };
+        }
+    } catch (e) {
+        console.error(`[ENGINE-ERROR] فشل في المحرك: ${e.message}`);
+        throw e;
     }
+    return null;
 }
 
-function timeToMs(t) {
-    const s = t.split(':');
-    return (parseInt(s[0]) * 3600000) + (parseInt(s[1]) * 60000) + (parseFloat(s[2].replace(',', '.')) * 1000);
-}
-
-function msToTime(ms) {
-    return new Date(ms).toISOString().slice(11, 23).replace('.', ',');
-}
-
-module.exports = { syncSrt };
+// السطر الأهم: تصدير الوظيفة ليراها addon.js
+module.exports = { getSyncedSubtitles };
