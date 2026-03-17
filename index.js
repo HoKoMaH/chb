@@ -3,57 +3,42 @@ const { serveHTTP } = require("stremio-addon-sdk");
 const addonInterface = require("./addon");
 const mongoose = require('mongoose');
 
-// 1. إعداد تطبيق Express
 const app = express();
 
-// 2. تعريف مسار ملفات الترجمة (هذا هو المفتاح لظهورها في ستريمو)
+// 1. الاتصال بقاعدة البيانات (تأكد من تعريف الموديل)
+mongoose.connect(process.env.MONGO_URI);
+
+const SubtitleSchema = new mongoose.Schema({
+    imdbId: String,
+    arabicText: String,
+    source: String,
+    createdAt: { type: Date, expires: '7d', default: Date.now }
+});
+const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
+
+// 2. مسار جلب ملف الـ SRT (يجب أن يكون قبل serveHTTP)
 app.get("/sub/:id.srt", async (req, res) => {
     try {
-        const imdbId = req.params.id;
-        console.log(`[HTTP] طلب تحميل ملف SRT لـ: ${imdbId}`);
+        const imdbId = req.params.id.replace('.srt', ''); // تنظيف الـ ID
+        console.log(`[HTTP] طلب ملف لـ: ${imdbId}`);
 
-        // جلب البيانات من المونجو (نتأكد من وجود الموديل)
-        const SubtitleModel = mongoose.models.Subtitle || mongoose.model('Subtitle', new mongoose.Schema({
-            imdbId: String,
-            arabicText: String,
-            source: String,
-            createdAt: { type: Date, expires: '7d', default: Date.now } // كاش لمدة 7 أيام
-        }));
-
-        const sub = await SubtitleModel.findOne({ imdbId });
+        const sub = await Subtitle.findOne({ imdbId: imdbId });
 
         if (sub && sub.arabicText) {
-            // إرسال الهيدرز الصحيحة ليعاملها المشغل كترجمة
             res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-            res.setHeader('Access-Control-Allow-Origin', '*'); // للسماح لجميع المتصفحات بالوصول
+            res.setHeader('Access-Control-Allow-Origin', '*'); // حل مشكلة ظهور الترجمة في المتصفح
             return res.send(sub.arabicText);
         }
-
-        console.error(`[HTTP-404] الترجمة غير موجودة في القاعدة لـ: ${imdbId}`);
-        res.status(404).send("Subtitle not found in cache.");
+        
+        res.status(404).send("Subtitle not found in database.");
     } catch (e) {
-        console.error(`[HTTP-ERROR] فشل جلب الملف: ${e.message}`);
+        console.error(`[ERROR] ${e.message}`);
         res.status(500).send("Internal Server Error");
     }
 });
 
-// 3. ربط SDK بـ Express وتشغيل السيرفر
-async function startServer() {
-    try {
-        await mongoose.connect(process.env.MONGO_URI);
-        console.log("✅ متصل بقاعدة بيانات MongoDB بنجاح");
+// 3. تشغيل الـ Addon SDK
+// ملاحظة: serveHTTP ستقوم بإضافة مسارات /manifest.json تلقائياً
+serveHTTP(addonInterface, { app, port: process.env.PORT || 10000 });
 
-        // دمج مسارات SDK مع تطبيق Express
-        serveHTTP(addonInterface, { 
-            app, 
-            port: process.env.PORT || 10000 
-        });
-
-        console.log(`🚀 السيرفر يعمل على المنفذ: ${process.env.PORT || 10000}`);
-    } catch (err) {
-        console.error("❌ فشل تشغيل السيرفر:", err.message);
-        process.exit(1);
-    }
-}
-
-startServer();
+console.log("🚀 السيرفر جاهز ومسار /sub مفعل");
