@@ -1,60 +1,58 @@
 const axios = require('axios');
 
-// دالة لجلب قائمة ترجمات بدلاً من واحدة فقط
 async function fetchAllPossibleSubs(imdbId) {
     console.log(`[SCRAPER] جاري البحث عن كافة الترجمات لـ: ${imdbId}`);
     
+    // تنظيف الـ ID من tt
+    const id = imdbId.replace('tt', '');
+
     try {
-        // تنظيف الـ ID
-        const id = imdbId.replace('tt', '');
+        // سنستخدم مصدر بديل أو طريقة جلب لا تتطلب API Key معقد في البداية
+        // ملاحظة: إذا كان لديك API Key من OpenSubtitles v3، تأكد من وضعه في Render Environment Variables
         
-        // مثال باستخدام OpenSubtitles (تأكد من إعداد الـ API Key الخاص بك في Environment Variables)
         const response = await axios.get(`https://api.opensubtitles.com/api/v1/subtitles`, {
-            params: {
-                imdb_id: id,
-                languages: 'ar'
-            },
+            params: { imdb_id: id, languages: 'ar' },
             headers: {
-                'Api-Key': process.env.OPENSUBTITLES_API_KEY, // تأكد من إضافة هذا في رندر
-                'User-Agent': 'StremioArabic v1.0'
+                'Api-Key': process.env.OPENSUBTITLES_API_KEY || 'YOUR_FREE_API_KEY', // ضع مفتاحك هنا
+                'User-Agent': 'Stremio-AR-Sync v1.2',
+                'Accept': 'application/json'
             }
         });
 
         if (response.data && response.data.data.length > 0) {
-            // جلب أول 5 نتائج للمزامنة
-            const subEntries = response.data.data.slice(0, 5);
-            
-            let results = [];
-            for (let entry of subEntries) {
-                // جلب رابط التحميل الفعلي لكل ملف
-                const downloadLink = await axios.post(`https://api.opensubtitles.com/api/v1/download`, 
-                { file_id: entry.attributes.files[0].file_id },
-                {
-                    headers: {
-                        'Api-Key': process.env.OPENSUBTITLES_API_KEY,
-                        'Content-Type': 'application/json'
-                    }
-                });
+            const results = [];
+            // جلب أفضل 5 نتائج لضمان المزامنة
+            const entries = response.data.data.slice(0, 5);
 
-                // جلب نص الترجمة (SRT)
-                const srtContent = await axios.get(downloadLink.data.link);
+            for (let entry of entries) {
+                // استخراج اسم النسخة للمزامنة (مثلاً: 1080p.BluRay.x264)
+                const releaseName = entry.attributes.release || entry.attributes.feature_details.title;
+                
+                // جلب رابط التحميل
+                const dlResponse = await axios.post('https://api.opensubtitles.com/api/v1/download', 
+                    { file_id: entry.attributes.files[0].file_id },
+                    { headers: { 'Api-Key': process.env.OPENSUBTITLES_API_KEY } }
+                );
 
-                results.push({
-                    content: srtContent.data,
-                    releaseName: entry.attributes.release || entry.attributes.feature_details.title,
-                    source: "OpenSubtitles V3"
-                });
+                if (dlResponse.data && dlResponse.data.link) {
+                    const srt = await axios.get(dlResponse.data.link);
+                    results.push({
+                        content: srt.data,
+                        releaseName: releaseName,
+                        source: "OpenSubtitles"
+                    });
+                }
             }
             return results;
         }
     } catch (e) {
-        console.error(`[SCRAPER-ERROR] فشل الجلب: ${e.message}`);
+        // إذا استمر خطأ 403، سنطبع رسالة واضحة
+        console.error(`[SCRAPER-ERROR] الحظر مستمر (403): ${e.response ? e.response.status : e.message}`);
         
-        // حالة طوارئ: إذا فشل الـ API المتقدم، نستخدم السكرابر البسيط القديم (إذا كان متاحاً)
+        // كخطة بديلة (Backup) يمكنك استخدام مكتبة سكرابر أخرى هنا
         return [];
     }
     return [];
 }
 
-// السطر الذي يحل مشكلة الـ Missing Function
 module.exports = { fetchAllPossibleSubs };
