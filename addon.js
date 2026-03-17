@@ -2,10 +2,11 @@ const { addonBuilder } = require("stremio-addon-sdk");
 const engine = require("./engine");
 
 const manifest = {
-    id: "org.arabic.autosync.subs",
-    version: "1.2.6",
-    name: "Arabic Auto-Sync",
-    description: "ترجمة عربية مزمّنة تلقائياً",
+    // تم تغيير الـ ID لضمان ظهورها كإضافة جديدة تماماً
+    id: "org.stremio.arsasubs.premium", 
+    version: "2.0.0",
+    name: "AR.SA Subtitles",
+    description: "Auto-Synced Arabic Subtitles for Movies and Series",
     resources: ["subtitles"],
     types: ["movie", "series"],
     catalogs: [],
@@ -16,24 +17,30 @@ const builder = new addonBuilder(manifest);
 
 builder.defineSubtitlesHandler(async (args) => {
     const { id } = args;
+    console.log(`[STREMIO] Request for ID: ${id}`);
+
     try {
         const subtitleData = await engine.getSyncedSubtitles(id);
+
         if (subtitleData) {
             const domain = "chb-gy3n.onrender.com";
+            const subUrl = `https://${domain}/sub/${id}.srt`;
+
             return {
                 subtitles: [
                     {
-                        id: `sync_${id}_ar`,
-                        lang: "ara",
-                        url: `https://${domain}/sub/${id}.srt`,
-                        label: `🇸🇦 العربية (مُزامنة: ${subtitleData.source})`
+                        id: `arsasubs_${id}`,
+                        lang: "ar.sa", // هذا سيجعلها تظهر باسم القسم الذي طلبته
+                        url: subUrl,
+                        label: `🇸🇦 AR.SA - ${subtitleData.source}`
                     }
                 ]
             };
         }
     } catch (e) {
-        console.error(e);
+        console.error(`[HANDLER-ERROR] ${e.message}`);
     }
+
     return { subtitles: [] };
 });
 
