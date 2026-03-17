@@ -3,7 +3,7 @@ const engine = require("./engine");
 
 const manifest = {
     id: "org.stremio.arsasubs.premium", 
-    version: "2.6.0", // رفع النسخة مهم جداً لتحديث الواجهة عندك
+    version: "2.7.0", 
     name: "AR.SA Subtitles",
     description: "إضافة الترجمة الاحترافية - قسم ar.sa",
     resources: ["subtitles"],
@@ -24,18 +24,24 @@ builder.defineSubtitlesHandler(async (args) => {
             const domain = "chb-gy3n.onrender.com";
             const subUrl = `https://${domain}/sub/${id}.srt`;
 
+            // --- هذا هو اللوق المطلوب للتأكد من الرابط ---
+            console.log("-----------------------------------------");
+            console.log(`✅ تم العثور على ترجمة للفيلم: ${id}`);
+            console.log(`🔗 رابط التحميل المباشر: ${subUrl}`);
+            console.log("-----------------------------------------");
+
             return {
                 subtitles: [
                     {
                         id: `arsasubs_${id}`,
-                        // 'ar-sa' ستجعلها تظهر كخيار لغة منفصل في العمود الأيسر
                         lang: "ar-sa", 
                         url: subUrl,
-                        // النص أدناه سيظهر في العمود الأوسط مكان 'SubDL Subtitles'
                         label: "ar.sa" 
                     }
                 ]
             };
+        } else {
+            console.log(`⚠️ لم يتم العثور على ترجمة لـ ${id} في المصادر.`);
         }
     } catch (e) {
         console.error(`[HANDLER-ERROR] ${e.message}`);
