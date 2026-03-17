@@ -1,55 +1,49 @@
 const scraper = require('./scraper');
 const mongoose = require('mongoose');
 
-const SubtitleSchema = new mongoose.Schema({
-    fileId: { type: String, unique: true },
-    imdbId: String,
-    arabicText: String,
-    label: String,
-    createdAt: { type: Date, expires: '7d', default: Date.now }
-});
+const Subtitle = mongoose.models.Subtitle;
 
-const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
-
-async function getSyncedSubtitles(imdbId) {
-    console.log(`[ENGINE] بدأت عملية البحث لـ: ${imdbId}`);
+async function getSyncedSubtitles(imdbId, videoFileName) {
+    console.log(`[ENGINE] 🧐 فحص المزامنة لملف: ${videoFileName}`);
     try {
-        // فحص السكرابر
-        console.log(`[ENGINE] استدعاء السكرابر...`);
         const allSubs = await scraper.fetchAllPossibleSubs(imdbId);
-        
-        if (!allSubs || allSubs.length === 0) {
-            console.log(`[ENGINE] ⚠️ السكرابر لم يجد أي نتائج.`);
-            return [];
-        }
+        if (!allSubs || allSubs.length === 0) return [];
 
-        console.log(`[ENGINE] تم العثور على ${allSubs.length} نسخة من السكرابر.`);
-        
         let results = [];
         for (let i = 0; i < Math.min(allSubs.length, 5); i++) {
             const sub = allSubs[i];
-            const fileId = `${imdbId}_v${i + 1}`;
+            const fileId = `${imdbId}_v${i + 1}_smart`;
 
-            // حفظ في القاعدة
+            // خوارزمية مطابقة بسيطة: هل كلمات اسم النسخة موجودة في اسم ملف الفيديو؟
+            const releaseKeywords = sub.releaseName.toLowerCase().split(/[\s.]+/);
+            const isMatch = videoFileName && releaseKeywords.some(kw => 
+                kw.length > 2 && videoFileName.toLowerCase().includes(kw)
+            );
+
             await Subtitle.findOneAndUpdate(
                 { fileId: fileId },
                 { 
                     imdbId: imdbId, 
                     arabicText: sub.content, 
-                    label: sub.releaseName || `Option ${i + 1}` 
+                    label: sub.releaseName 
                 },
-                { upsert: true, new: true }
+                { upsert: true }
             );
             
-            results.push({ fileId: fileId, label: sub.releaseName || `Option ${i + 1}` });
+            results.push({ 
+                fileId: fileId, 
+                label: sub.releaseName, 
+                isMatch: isMatch // إرسال نتيجة المطابقة للـ Addon
+            });
         }
         
-        console.log(`[ENGINE] ✅ تمت معالجة وحفظ ${results.length} نتائج.`);
-        return results;
+        // ترتيب النتائج بحيث تظهر النسخة المطابقة (⭐) في الأعلى
+        return results.sort((a, b) => b.isMatch - a.isMatch);
+
     } catch (e) {
-        console.error(`[ENGINE-ERROR] ❌ خطأ داخلي: ${e.message}`);
-        return [];
+        console.error(`[ENGINE-ERROR] ${e.message}`);
     }
+    return [];
 }
 
 module.exports = { getSyncedSubtitles };
