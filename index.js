@@ -1,110 +1,71 @@
-const express = require('express');
-const { getRouter } = require("stremio-addon-sdk");
-const addonInterface = require("./addon");
-const mongoose = require('mongoose');
-
-const app = express();
-
 /**
- * 1. الاتصال بقاعدة البيانات MongoDB
- * يتم سحب الرابط من إعدادات Render (Environment Variables)
- */
-mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log("✅ Connected to MongoDB Successfully"))
-    .catch(err => console.error("❌ MongoDB Connection Error:", err));
-
-/**
- * 2. إعدادات منع الكاش (Cache Control)
- * لضمان أن Stremio يطلب ترجمة جديدة عند كل فيلم ولا يعتمد على القديم
- */
-app.use((req, res, next) => {
-    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-    res.setHeader('Pragma', 'no-cache');
-    res.setHeader('Expires', '0');
-    next();
-});
-
-/**
- * 3. تعريف الـ Schema والموديل (Subtitle)
- * هذا الهيكل يدعم تمييز الترجمة الآلية (isAI)
- */
-const SubtitleSchema = new mongoose.Schema({
-    fileId: { type: String, unique: true },
-    imdbId: String,
-    arabicText: String,
-    label: String,
-    isAI: { type: Boolean, default: false },
-    createdAt: { type: Date, expires: '15d', default: Date.now } // حذف تلقائي بعد 15 يوم
-});
-
-const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
-
-/**
- * 4. مسار جلب ملف الـ SRT
- * يقوم بقراءة النص من القاعدة وإرساله للمشغل
- */
-app.get("/sub/:fileId.srt", async (req, res) => {
-    try {
-        const fileId = req.params.fileId.replace('.srt', '');
-        const sub = await Subtitle.findOne({ fileId });
-
-        if (sub && sub.arabicText) {
-            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-            res.setHeader('Access-Control-Allow-Origin', '*');
-            return res.send(sub.arabicText);
-        }
-        res.status(404).send("Subtitle not found.");
-    } catch (e) {
-        res.status(500).send(e.message);
-    }
-});
-
-/**
- * 5. صفحة الإحصائيات (Dashboard)
- * الرابط: https://your-app.onrender.com/stats
+ * صفحة الإحصائيات واستعراض الترجمات (Advanced Dashboard)
+ * الرابط: https://chb-gy3n.onrender.com/stats
  */
 app.get("/stats", async (req, res) => {
     try {
+        // جلب آخر 50 ترجمة تم تخزينها
+        const subs = await Subtitle.find().sort({ createdAt: -1 }).limit(50);
         const totalSubs = await Subtitle.countDocuments();
         const aiSubs = await Subtitle.countDocuments({ isAI: true });
-        const originalSubs = totalSubs - aiSubs;
+
+        let tableRows = subs.map(sub => `
+            <tr style="border-bottom: 1px solid #ddd;">
+                <td style="padding: 12px; text-align: right;">${sub.label}</td>
+                <td style="padding: 12px;">${sub.isAI ? '🤖 ذكاء اصطناعي' : '🇸🇦 أصلية'}</td>
+                <td style="padding: 12px;">${new Date(sub.createdAt).toLocaleDateString('ar-SA')}</td>
+                <td style="padding: 12px;">
+                    <a href="/sub/${sub.fileId}.srt" download="${sub.label}.srt" 
+                       style="background: #3498db; color: white; padding: 5px 15px; border-radius: 5px; text-decoration: none; font-size: 12px;">
+                       تحميل ↓
+                    </a>
+                </td>
+            </tr>
+        `).join('');
 
         const html = `
-        <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; text-align: center; padding: 50px; background: #f4f7f6; min-height: 100vh; direction: rtl;">
-            <h1 style="color: #2c3e50;">📊 لوحة تحكم AR.SA Smart-Sync</h1>
-            <div style="display: flex; justify-content: center; gap: 20px; margin-top: 30px; flex-wrap: wrap;">
-                <div style="background: #ffffff; padding: 25px; border-radius: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.05); width: 220px; border-bottom: 5px solid #3498db;">
-                    <h3 style="color: #7f8c8d;">إجمالي الملفات</h3>
-                    <p style="font-size: 32px; font-weight: bold; color: #3498db; margin: 10px 0;">${totalSubs}</p>
+        <div style="font-family: 'Segoe UI', Tahoma, sans-serif; background: #f8f9fa; min-height: 100vh; padding: 40px; direction: rtl;">
+            <div style="max-width: 1000px; margin: auto;">
+                <h1 style="text-align: center; color: #2c3e50;">📊 لوحة تحكم AR.SA الذكية</h1>
+                
+                <div style="display: flex; justify-content: center; gap: 20px; margin-bottom: 40px;">
+                    <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); flex: 1; text-align: center;">
+                        <h4 style="margin: 0; color: #7f8c8d;">إجمالي الملفات</h4>
+                        <p style="font-size: 24px; font-weight: bold; color: #3498db;">${totalSubs}</p>
+                    </div>
+                    <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); flex: 1; text-align: center;">
+                        <h4 style="margin: 0; color: #7f8c8d;">ترجمة AI 🤖</h4>
+                        <p style="font-size: 24px; font-weight: bold; color: #2ecc71;">${aiSubs}</p>
+                    </div>
                 </div>
-                <div style="background: #ffffff; padding: 25px; border-radius: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.05); width: 220px; border-bottom: 5px solid #2ecc71;">
-                    <h3 style="color: #7f8c8d;">ترجمة آلية 🤖</h3>
-                    <p style="font-size: 32px; font-weight: bold; color: #2ecc71; margin: 10px 0;">${aiSubs}</p>
+
+                <div style="background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+                    <h3 style="margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px;">آخر الملفات المضافة</h3>
+                    <table style="width: 100%; border-collapse: collapse;">
+                        <thead>
+                            <tr style="background: #f1f1f1;">
+                                <th style="padding: 12px; text-align: right;">اسم الملف / النسخة</th>
+                                <th style="padding: 12px; text-align: right;">النوع</th>
+                                <th style="padding: 12px; text-align: right;">التاريخ</th>
+                                <th style="padding: 12px; text-align: right;">التحكم</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${tableRows}
+                        </tbody>
+                    </table>
+                    ${subs.length === 0 ? '<p style="text-align:center; padding: 20px;">لا توجد ترجمات مخزنة بعد.</p>' : ''}
                 </div>
-                <div style="background: #ffffff; padding: 25px; border-radius: 15px; box-shadow: 0 10px 20px rgba(0,0,0,0.05); width: 220px; border-bottom: 5px solid #f1c40f;">
-                    <h3 style="color: #7f8c8d;">ترجمة أصلية 🇸🇦</h3>
-                    <p style="font-size: 32px; font-weight: bold; color: #f1c40f; margin: 10px 0;">${originalSubs}</p>
-                </div>
-            </div>
-            <div style="margin-top: 40px; padding: 15px; background: #fff; display: inline-block; border-radius: 10px; color: #27ae60; font-weight: bold;">
-                الحالة الآن: متصل بالخادم 🟢
+                
+                <p style="text-align: center; margin-top: 30px; color: #bdc3c7; font-size: 14px;">تحديث تلقائي عند كل طلب جديد 🟢</p>
             </div>
         </div>
         `;
+
         res.setHeader('Content-Type', 'text/html; charset=utf-8');
         res.send(html);
     } catch (e) {
-        res.status(500).send("خطأ في تحميل الإحصائيات");
+        console.error(e);
+        res.status(500).send("خطأ في تحميل لوحة التحكم");
     }
-});
-
-/**
- * 6. تشغيل واجهة Stremio
- */
-const addonRouter = getRouter(addonInterface);
-app.use("/", addonRouter);
-
-const port = process.env.PORT || 10000;
-app.listen(port, () => {
-    console.log(`🚀 AR.SA Smart-Sync Server Live on port ${port}`);
 });
