@@ -1,31 +1,44 @@
 const scraper = require('./scraper');
-// افترضنا وجود موديل للمونجو هنا لتخزين الكاش
-// const SubtitleModel = require('./models/subtitle'); 
+const mongoose = require('mongoose');
+
+// تعريف الموديل لضمان استخدامه للحفظ
+const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', new mongoose.Schema({
+    imdbId: String,
+    arabicText: String,
+    source: String,
+    createdAt: { type: Date, expires: '7d', default: Date.now }
+}));
 
 async function getSyncedSubtitles(imdbId) {
     try {
         console.log(`[ENGINE] جاري معالجة الطلب لـ: ${imdbId}`);
 
-        // 1. محاولة جلب الترجمة من السكرابر
+        // 1. البحث في الكاش أولاً لتوفير الوقت
+        const cached = await Subtitle.findOne({ imdbId });
+        if (cached) {
+            console.log(`[CACHE] تم العثور على الترجمة في القاعدة.`);
+            return { source: cached.source };
+        }
+
+        // 2. إذا لم تكن موجودة، نجلبها من السكرابر
         const subData = await scraper.fetchSubs(imdbId);
 
-        if (subData) {
-            // هنا نقوم بصياغة الرابط الذي سيقرأه Stremio
-            // إذا كنت تستخدم سيرفر وسيط لتحويل الملف، نضع الرابط هنا
-            // للتبسيط، سنفترض أننا سنرسل رابط الملف المستخرج
+        if (subData && subData.araRaw) {
+            // 3. --- الخطوة الأهم: الحفظ في المونجو ---
+            const newSub = new Subtitle({
+                imdbId: imdbId,
+                arabicText: subData.araRaw,
+                source: subData.source
+            });
+            await newSub.save();
             
-            return {
-                proxyUrl: `https://your-app-url.onrender.com/sub/${imdbId}.srt`, // هذا المسار يجب أن يكون معرفاً في index.js
-                source: subData.source,
-                label: "Arabic Synced"
-            };
+            console.log(`[DB] تم حفظ الترجمة بنجاح في MongoDB.`);
+            return { source: subData.source };
         }
     } catch (e) {
-        console.error(`[ENGINE-ERROR] فشل في المحرك: ${e.message}`);
-        throw e;
+        console.error(`[ENGINE-ERROR] ${e.message}`);
     }
     return null;
 }
 
-// السطر الأهم: تصدير الوظيفة ليراها addon.js
 module.exports = { getSyncedSubtitles };
