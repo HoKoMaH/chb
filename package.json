@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "stremio-addon-sdk": "latest",
+    "mongoose": "^8.0.0",
+    "axios": "^1.6.0",
+    "srt-parser-2": "^1.2.2",
+    "adm-zip": "^0.5.10" 
+  }
+}
