@@ -3,9 +3,9 @@ const engine = require("./engine");
 
 const manifest = {
     id: "org.stremio.arsasubs.premium", 
-    version: "2.1.0", // رفعنا النسخة لضمان التحديث
+    version: "2.5.0", // رفع النسخة ضروري جداً لتحديث الواجهة
     name: "AR.SA Subtitles",
-    description: "إضافة الترجمة المزامنة تلقائياً - قسم AR.SA",
+    description: "توفير ترجمة مزمّنة تلقائياً بقسم خاص",
     resources: ["subtitles"],
     types: ["movie", "series"],
     catalogs: [],
@@ -18,7 +18,6 @@ builder.defineSubtitlesHandler(async (args) => {
     const { id } = args;
     
     try {
-        // استدعاء المحرك لجلب بيانات الترجمة من MongoDB أو السكرابر
         const subtitleData = await engine.getSyncedSubtitles(id);
 
         if (subtitleData) {
@@ -29,10 +28,11 @@ builder.defineSubtitlesHandler(async (args) => {
                 subtitles: [
                     {
                         id: `arsasubs_${id}`,
-                        lang: "ara", // الكود ara يضمن ظهورها في قائمة "العربية"
+                        // تغيير lang إلى ar-SA سيجعلها تظهر كخيار لغة مستقل
+                        lang: "ar-SA", 
                         url: subUrl,
-                        // هنا نضع اسم القسم ar.sa الذي طلبته ليظهر بجانب العلم
-                        label: `🇸🇦 ar.sa - مزمّنة` 
+                        // الـ label هو ما سيظهر تحت اسم اللغة (مثل SubDL Subtitles في صورتك)
+                        label: `🇸🇦 ar.sa - AutoSync`
                     }
                 ]
             };
