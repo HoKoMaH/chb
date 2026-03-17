@@ -2,11 +2,10 @@ const { addonBuilder } = require("stremio-addon-sdk");
 const engine = require("./engine");
 
 const manifest = {
-    // تم تغيير الـ ID لضمان ظهورها كإضافة جديدة تماماً
     id: "org.stremio.arsasubs.premium", 
-    version: "2.0.0",
+    version: "2.1.0", // رفعنا النسخة لضمان التحديث
     name: "AR.SA Subtitles",
-    description: "Auto-Synced Arabic Subtitles for Movies and Series",
+    description: "إضافة الترجمة المزامنة تلقائياً - قسم AR.SA",
     resources: ["subtitles"],
     types: ["movie", "series"],
     catalogs: [],
@@ -17,9 +16,9 @@ const builder = new addonBuilder(manifest);
 
 builder.defineSubtitlesHandler(async (args) => {
     const { id } = args;
-    console.log(`[STREMIO] Request for ID: ${id}`);
-
+    
     try {
+        // استدعاء المحرك لجلب بيانات الترجمة من MongoDB أو السكرابر
         const subtitleData = await engine.getSyncedSubtitles(id);
 
         if (subtitleData) {
@@ -30,9 +29,10 @@ builder.defineSubtitlesHandler(async (args) => {
                 subtitles: [
                     {
                         id: `arsasubs_${id}`,
-                        lang: "ar.sa", // هذا سيجعلها تظهر باسم القسم الذي طلبته
+                        lang: "ara", // الكود ara يضمن ظهورها في قائمة "العربية"
                         url: subUrl,
-                        label: `🇸🇦 AR.SA - ${subtitleData.source}`
+                        // هنا نضع اسم القسم ar.sa الذي طلبته ليظهر بجانب العلم
+                        label: `🇸🇦 ar.sa - مزمّنة` 
                     }
                 ]
             };
