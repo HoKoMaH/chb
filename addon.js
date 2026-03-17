@@ -2,37 +2,36 @@ const { addonBuilder } = require("stremio-addon-sdk");
 const engine = require("./engine");
 
 const manifest = {
-    id: "org.stremio.arsasubs.v7.final", // تحديث النسخة لمسح الكاش القديم
+    id: "org.stremio.arsasubs.v7.final",
     version: "7.0.0",
     name: "AR.SA Ultimate-Sync",
-    description: "ترجمات أصلية + ترجمة فورية بالذكاء الاصطناعي (AI) للأفلام النادرة",
+    description: "نظام المزامنة والترجمة الذكية الشامل",
     resources: ["subtitles"],
     types: ["movie", "series"],
     catalogs: [],
-    logo: "https://cdn-icons-png.flaticon.com/512/1532/1532556.png"
+    logo: "https://raw.githubusercontent.com/HoKoMaH/chb/main/logo.png"
 };
 
 const builder = new addonBuilder(manifest);
 
 builder.defineSubtitlesHandler(async (args) => {
     const { id, extra } = args;
-    const videoFileName = extra.filename || ""; 
+    const videoFileName = extra.filename || "Unknown_File"; 
 
-    console.log(`[STREMIO] طلب لفيلم: ${id} | الملف: ${videoFileName}`);
+    console.log(`\n[STREMIO-REQUEST] 📥 طلب جديد:`);
+    console.log(`   - معرف المحتوى: ${id}`);
+    console.log(`   - اسم الملف: ${videoFileName}`);
 
     try {
-        // استدعاء المحرك الذي يبحث في القاعدة ثم المصادر
         const subtitlesList = await engine.getSyncedSubtitles(id, videoFileName);
 
         if (subtitlesList && subtitlesList.length > 0) {
+            console.log(`[STREMIO-RESPONSE] ✅ إرسال ${subtitlesList.length} ترجمة إلى التطبيق.`);
             const domain = "chb-gy3n.onrender.com";
             
             return {
                 subtitles: subtitlesList.map(sub => {
-                    // إضافة إيموجي الروبوت 🤖 للترجمة المترجمة آلياً
-                    // وإضافة النجمة ⭐ للنسخة المزامنة مع ملف المستخدم
                     let label = `ar.sa | ${sub.label}`;
-                    
                     if (sub.isAI) label = `🤖 AI | ${sub.label}`;
                     if (sub.isMatch) label = `⭐ ${label}`;
 
@@ -44,9 +43,11 @@ builder.defineSubtitlesHandler(async (args) => {
                     };
                 })
             };
+        } else {
+            console.log(`[STREMIO-RESPONSE] ⚠️ لا توجد نتائج لإرسالها.`);
         }
     } catch (e) {
-        console.error(`[ADDON-ERROR] ${e.message}`);
+        console.error(`[STREMIO-ERROR] ❌ خطأ في المعالجة: ${e.message}`);
     }
     return { subtitles: [] };
 });
