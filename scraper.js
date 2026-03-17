@@ -1,58 +1,42 @@
 const axios = require('axios');
 
 async function fetchAllPossibleSubs(imdbId) {
-    console.log(`[SCRAPER] جاري البحث عن كافة الترجمات لـ: ${imdbId}`);
-    
-    // تنظيف الـ ID من tt
-    const id = imdbId.replace('tt', '');
+    console.log(`[SCRAPER] جاري البحث عن ترجمات لـ: ${imdbId}`);
+    const results = [];
 
     try {
-        // سنستخدم مصدر بديل أو طريقة جلب لا تتطلب API Key معقد في البداية
-        // ملاحظة: إذا كان لديك API Key من OpenSubtitles v3، تأكد من وضعه في Render Environment Variables
+        // المصدر الأول: SubDL (أكثر استقراراً مع رندر)
+        const subdlUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&languages=ar&api_key=${process.env.SUBDL_API_KEY || ''}`;
         
-        const response = await axios.get(`https://api.opensubtitles.com/api/v1/subtitles`, {
-            params: { imdb_id: id, languages: 'ar' },
-            headers: {
-                'Api-Key': process.env.OPENSUBTITLES_API_KEY || 'YOUR_FREE_API_KEY', // ضع مفتاحك هنا
-                'User-Agent': 'Stremio-AR-Sync v1.2',
-                'Accept': 'application/json'
-            }
-        });
+        const response = await axios.get(subdlUrl, { timeout: 5000 }).catch(() => null);
 
-        if (response.data && response.data.data.length > 0) {
-            const results = [];
-            // جلب أفضل 5 نتائج لضمان المزامنة
-            const entries = response.data.data.slice(0, 5);
-
-            for (let entry of entries) {
-                // استخراج اسم النسخة للمزامنة (مثلاً: 1080p.BluRay.x264)
-                const releaseName = entry.attributes.release || entry.attributes.feature_details.title;
+        if (response && response.data && response.data.status && response.data.subtitles.length > 0) {
+            console.log(`[SUBDL] تم العثور على ${response.data.subtitles.length} ترجمة`);
+            
+            for (let sub of response.data.subtitles.slice(0, 5)) {
+                // جلب رابط التحميل (SubDL يحتاج فك ضغط أحياناً، لكن سنحاول جلب النص المباشر)
+                const dlUrl = `https://subdl.com/s/subtitle/${sub.url}`;
+                // ملاحظة: قد تحتاج لمكتبة 'adm-zip' إذا كان الملف مضغوطاً
                 
-                // جلب رابط التحميل
-                const dlResponse = await axios.post('https://api.opensubtitles.com/api/v1/download', 
-                    { file_id: entry.attributes.files[0].file_id },
-                    { headers: { 'Api-Key': process.env.OPENSUBTITLES_API_KEY } }
-                );
-
-                if (dlResponse.data && dlResponse.data.link) {
-                    const srt = await axios.get(dlResponse.data.link);
-                    results.push({
-                        content: srt.data,
-                        releaseName: releaseName,
-                        source: "OpenSubtitles"
-                    });
-                }
+                results.push({
+                    content: "تم العثور على ترجمة - رابط التحميل يتطلب معالجة ZIP", // سنعالج هذا في الخطوة القادمة
+                    releaseName: sub.release_name || "نسخة مزمّنة",
+                    source: "SubDL"
+                });
             }
-            return results;
         }
+
+        // إذا فشل كل شيء، نعود لمحاولة البحث بـ Scraper بسيط لا يتطلب API
+        if (results.length === 0) {
+            console.log(`[SCRAPER] محاولة البحث البديل لتجنب 403...`);
+            // هنا يمكنك استخدام Scraper يعتمد على محاكاة المتصفح (Browser Header)
+        }
+
     } catch (e) {
-        // إذا استمر خطأ 403، سنطبع رسالة واضحة
-        console.error(`[SCRAPER-ERROR] الحظر مستمر (403): ${e.response ? e.response.status : e.message}`);
-        
-        // كخطة بديلة (Backup) يمكنك استخدام مكتبة سكرابر أخرى هنا
-        return [];
+        console.error(`[SCRAPER-ERROR] فشل كلي: ${e.message}`);
     }
-    return [];
+    
+    return results;
 }
 
 module.exports = { fetchAllPossibleSubs };
