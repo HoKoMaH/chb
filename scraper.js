@@ -1,58 +1,77 @@
 const axios = require('axios');
 const AdmZip = require('adm-zip');
+const { Perplexity } = require('perplexity-ai'); // استدعاء المكتبة
 
-async function fetchAllPossibleSubs(imdbId) {
-    console.log(`[SCRAPER] جاري البحث عن ترجمات في SubDL لـ: ${imdbId}`);
-    const results = [];
+const pp_client = new Perplexity(process.env.PERPLEXITY_API_KEY);
+
+async function translateWithAI(englishSrt) {
+    console.log("[AI] 🤖 بدأت عملية الترجمة بالذكاء الاصطناعي...");
     
-    // تأكد من إضافة المفتاح في Render Environment Variables
-    const API_KEY = process.env.SUBDL_API_KEY; 
+    // سنرسل أول 50 سطر فقط كمثال لضمان عدم تجاوز حدود الـ Token 
+    // في المشاريع الكبيرة يفضل تقسيم الملف إلى أجزاء
+    const prompt = `Translate this SRT subtitle content to natural Arabic. 
+    Keep the timing format exactly as it is. Only return the translated SRT text:
+    \n\n${englishSrt.slice(0, 5000)}`; // نأخذ جزءاً للتجربة
 
     try {
-        // 1. طلب البحث من API SubDL
-        const searchUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&languages=ar&api_key=${API_KEY}`;
-        const response = await axios.get(searchUrl);
+        const response = await pp_client.chat.create({
+            model: "sonar-reasoning", // أو الموديل الذي تفضله
+            messages: [{ role: "user", content: prompt }]
+        });
+        return response.choices[0].message.content;
+    } catch (e) {
+        console.error("[AI-ERROR] فشل Perplexity:", e.message);
+        return null;
+    }
+}
 
-        if (response.data && response.data.status && response.data.subtitles.length > 0) {
-            // نأخذ أفضل 5 نتائج للمزامنة
-            const subs = response.data.subtitles.slice(0, 5);
-            console.log(`[SUBDL] تم العثور على ${subs.length} نسخة مترجمة.`);
+async function fetchAllPossibleSubs(imdbId) {
+    const API_KEY = process.env.SUBDL_API_KEY;
+    let results = [];
 
-            for (let sub of subs) {
-                try {
-                    // 2. تحميل ملف الـ ZIP
-                    const dlUrl = `https://dl.subdl.com${sub.url}`; // قد تختلف حسب تحديث الـ API
-                    const zipResponse = await axios.get(sub.download_url || dlUrl, {
-                        responseType: 'arraybuffer'
-                    });
+    try {
+        // 1. البحث عن ترجمة عربية أولاً
+        let response = await axios.get(`https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&languages=ar&api_key=${API_KEY}`);
+        
+        if (response.data.subtitles.length > 0) {
+            results = await processSubDLResults(response.data.subtitles.slice(0, 3));
+        }
 
-                    // 3. فك ضغط الملف في الذاكرة (Memory)
-                    const zip = new AdmZip(Buffer.from(zipResponse.data));
-                    const zipEntries = zip.getEntries();
-
-                    // البحث عن أول ملف ينتهي بـ .srt داخل الـ ZIP
-                    const srtEntry = zipEntries.find(entry => entry.entryName.endsWith('.srt'));
-
-                    if (srtEntry) {
-                        const srtText = srtEntry.getData().toString('utf8');
-                        
+        // 2. إذا لم نجد عربية، نبحث عن إنجليزية ونترجمها!
+        if (results.length === 0) {
+            console.log("[SCRAPER] ⚠️ لا يوجد ترجمة عربية. جاري البحث عن إنجليزية لترجمتها بالذكاء الاصطناعي...");
+            let enResponse = await axios.get(`https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&languages=en&api_key=${API_KEY}`);
+            
+            if (enResponse.data.subtitles.length > 0) {
+                const enSub = enResponse.data.subtitles[0];
+                const enSrt = await downloadAndUnzip(enSub.url);
+                
+                if (enSrt) {
+                    const arSrt = await translateWithAI(enSrt);
+                    if (arSrt) {
                         results.push({
-                            content: srtText,
-                            releaseName: sub.release_name || "نسخة مزمّنة",
-                            source: "SubDL"
+                            content: arSrt,
+                            releaseName: `${enSub.release_name} (AI Translated)`,
+                            source: "Perplexity AI"
                         });
-                        console.log(`[SCRAPER] ✅ تم تجهيز النسخة: ${sub.release_name}`);
                     }
-                } catch (err) {
-                    console.error(`[SCRAPER] خطأ في معالجة ملف ZIP: ${err.message}`);
                 }
             }
         }
     } catch (e) {
-        console.error(`[SCRAPER-ERROR] فشل الجلب من SubDL: ${e.message}`);
+        console.error("Scraper Error:", e.message);
     }
-
     return results;
+}
+
+// دالة مساعدة لتحميل وفك الضغط
+async function downloadAndUnzip(subUrl) {
+    try {
+        const res = await axios.get(`https://dl.subdl.com${subUrl}`, { responseType: 'arraybuffer' });
+        const zip = new AdmZip(Buffer.from(res.data));
+        const srt = zip.getEntries().find(e => e.entryName.endsWith('.srt'));
+        return srt ? srt.getData().toString('utf8') : null;
+    } catch { return null; }
 }
 
 module.exports = { fetchAllPossibleSubs };
