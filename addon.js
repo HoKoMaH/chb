@@ -2,10 +2,10 @@ const { addonBuilder } = require("stremio-addon-sdk");
 const engine = require("./engine");
 
 const manifest = {
-    id: "org.stremio.arsasubs.v3.new", 
-    version: "3.0.0", 
-    name: "AR.SA Subtitles V3",
-    description: "إضافة الترجمة الاحترافية - قسم ar.sa",
+    id: "org.stremio.arsasubs.v4", // تغيير الـ ID لضمان تحديث الواجهة
+    version: "4.0.0",
+    name: "AR.SA Multi-Sync",
+    description: "ترجمات متعددة مزمّنة تلقائياً لضمان الدقة 100%",
     resources: ["subtitles"],
     types: ["movie", "series"],
     catalogs: [],
@@ -16,35 +16,24 @@ const builder = new addonBuilder(manifest);
 
 builder.defineSubtitlesHandler(async (args) => {
     const { id } = args;
-    
+
     try {
-        const subtitleData = await engine.getSyncedSubtitles(id);
+        const subtitlesList = await engine.getSyncedSubtitles(id);
 
-        if (subtitleData) {
+        if (subtitlesList && subtitlesList.length > 0) {
             const domain = "chb-gy3n.onrender.com";
-            const subUrl = `https://${domain}/sub/${id}.srt`;
-
-            // --- هذا هو اللوق المطلوب للتأكد من الرابط ---
-            console.log("-----------------------------------------");
-            console.log(`✅ تم العثور على ترجمة للفيلم: ${id}`);
-            console.log(`🔗 رابط التحميل المباشر: ${subUrl}`);
-            console.log("-----------------------------------------");
 
             return {
-                subtitles: [
-                    {
-                        id: `arsasubs_${id}`,
-                        lang: "ar-sa", 
-                        url: subUrl,
-                        label: "ar.sa" 
-                    }
-                ]
+                subtitles: subtitlesList.map(sub => ({
+                    id: sub.fileId,
+                    lang: "ar-sa",
+                    url: `https://${domain}/sub/${sub.fileId}.srt`,
+                    label: `🇸🇦 ar.sa | ${sub.label}`
+                }))
             };
-        } else {
-            console.log(`⚠️ لم يتم العثور على ترجمة لـ ${id} في المصادر.`);
         }
     } catch (e) {
-        console.error(`[HANDLER-ERROR] ${e.message}`);
+        console.error(`[ADDON-ERROR] ${e.message}`);
     }
 
     return { subtitles: [] };
