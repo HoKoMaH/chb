@@ -9,15 +9,15 @@ const app = express();
 mongoose.connect(process.env.MONGO_URI);
 
 const SubtitleSchema = new mongoose.Schema({
-    fileId: { type: String, unique: true }, // معرف فريد للنسخة (مثلاً tt123_sub1)
+    fileId: { type: String, unique: true },
     imdbId: String,
     arabicText: String,
     label: String,
     createdAt: { type: Date, expires: '7d', default: Date.now }
 });
+
 const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
 
-// مسار جلب ملف الـ SRT باستخدام الـ fileId
 app.get("/sub/:fileId.srt", async (req, res) => {
     try {
         const fileId = req.params.fileId.replace('.srt', '');
