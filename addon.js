@@ -3,9 +3,9 @@ const engine = require("./engine");
 
 const manifest = {
     id: "org.stremio.arsasubs.premium", 
-    version: "2.5.0", // رفع النسخة ضروري جداً لتحديث الواجهة
+    version: "2.6.0", // رفع النسخة مهم جداً لتحديث الواجهة عندك
     name: "AR.SA Subtitles",
-    description: "توفير ترجمة مزمّنة تلقائياً بقسم خاص",
+    description: "إضافة الترجمة الاحترافية - قسم ar.sa",
     resources: ["subtitles"],
     types: ["movie", "series"],
     catalogs: [],
@@ -28,11 +28,11 @@ builder.defineSubtitlesHandler(async (args) => {
                 subtitles: [
                     {
                         id: `arsasubs_${id}`,
-                        // تغيير lang إلى ar-SA سيجعلها تظهر كخيار لغة مستقل
-                        lang: "ar-SA", 
+                        // 'ar-sa' ستجعلها تظهر كخيار لغة منفصل في العمود الأيسر
+                        lang: "ar-sa", 
                         url: subUrl,
-                        // الـ label هو ما سيظهر تحت اسم اللغة (مثل SubDL Subtitles في صورتك)
-                        label: `🇸🇦 ar.sa - AutoSync`
+                        // النص أدناه سيظهر في العمود الأوسط مكان 'SubDL Subtitles'
+                        label: "ar.sa" 
                     }
                 ]
             };
