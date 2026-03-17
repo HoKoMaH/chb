@@ -1,24 +1,29 @@
 const scraper = require('./scraper');
 const mongoose = require('mongoose');
 
-const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle');
+// تعريف الـ Schema محلياً لضمان تسجيلها قبل الاستخدام
+const SubtitleSchema = new mongoose.Schema({
+    fileId: { type: String, unique: true },
+    imdbId: String,
+    arabicText: String,
+    label: String,
+    createdAt: { type: Date, expires: '7d', default: Date.now }
+});
+
+// هذه السطر يفحص إذا كان الموديل موجوداً، وإذا لم يكن، ينشئه
+const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
 
 async function getSyncedSubtitles(imdbId) {
     try {
         console.log(`[ENGINE] جاري البحث عن خيارات متعددة لـ: ${imdbId}`);
-
-        // طلب قائمة بكل الترجمات المتاحة من السكرابر
         const allSubs = await scraper.fetchAllPossibleSubs(imdbId);
 
         if (allSubs && allSubs.length > 0) {
             let results = [];
-            
-            // نأخذ أول 5 نتائج (الأكثر دقة عادة)
             for (let i = 0; i < Math.min(allSubs.length, 5); i++) {
                 const sub = allSubs[i];
-                const fileId = `${imdbId}_v${i + 1}`; // توليد ID فريد لكل نسخة
+                const fileId = `${imdbId}_v${i + 1}`;
 
-                // حفظ في القاعدة إذا لم تكن موجودة
                 const exists = await Subtitle.findOne({ fileId });
                 if (!exists) {
                     await new Subtitle({
@@ -28,11 +33,7 @@ async function getSyncedSubtitles(imdbId) {
                         label: sub.releaseName || `نسخة مزمّنة ${i + 1}`
                     }).save();
                 }
-
-                results.push({
-                    fileId: fileId,
-                    label: sub.releaseName || `Option ${i + 1}`
-                });
+                results.push({ fileId: fileId, label: sub.releaseName || `Option ${i + 1}` });
             }
             return results;
         }
