@@ -1,41 +1,38 @@
-const express = require('express');
-const { getRouter } = require("stremio-addon-sdk");
-const addonInterface = require("./addon");
-const mongoose = require('mongoose');
+const { addonBuilder } = require("stremio-addon-sdk");
+const engine = require("./engine");
 
-const app = express();
+const manifest = {
+    id: "org.stremio.arsasubs.v4", 
+    version: "4.0.1",
+    name: "AR.SA Multi-Sync",
+    description: "ترجمات متعددة مزمّنة تلقائياً",
+    resources: ["subtitles"],
+    types: ["movie", "series"],
+    catalogs: [],
+    logo: "https://cdn-icons-png.flaticon.com/512/1532/1532556.png"
+};
 
-// الاتصال بـ MongoDB
-mongoose.connect(process.env.MONGO_URI);
+const builder = new addonBuilder(manifest);
 
-const SubtitleSchema = new mongoose.Schema({
-    fileId: { type: String, unique: true },
-    imdbId: String,
-    arabicText: String,
-    label: String,
-    createdAt: { type: Date, expires: '7d', default: Date.now }
-});
-
-const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
-
-app.get("/sub/:fileId.srt", async (req, res) => {
+builder.defineSubtitlesHandler(async (args) => {
+    const { id } = args;
     try {
-        const fileId = req.params.fileId.replace('.srt', '');
-        const sub = await Subtitle.findOne({ fileId });
-
-        if (sub && sub.arabicText) {
-            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-            res.setHeader('Access-Control-Allow-Origin', '*');
-            return res.send(sub.arabicText);
+        const subtitlesList = await engine.getSyncedSubtitles(id);
+        if (subtitlesList && subtitlesList.length > 0) {
+            const domain = "chb-gy3n.onrender.com";
+            return {
+                subtitles: subtitlesList.map(sub => ({
+                    id: sub.fileId,
+                    lang: "ar-sa",
+                    url: `https://${domain}/sub/${sub.fileId}.srt`,
+                    label: `🇸🇦 ar.sa | ${sub.label}`
+                }))
+            };
         }
-        res.status(404).send("Subtitle not found.");
     } catch (e) {
-        res.status(500).send(e.message);
+        console.error(e);
     }
+    return { subtitles: [] };
 });
 
-const addonRouter = getRouter(addonInterface);
-app.use("/", addonRouter);
-
-const port = process.env.PORT || 10000;
-app.listen(port, () => console.log(`🚀 Server running on port ${port}`));
+module.exports = builder.getInterface();
