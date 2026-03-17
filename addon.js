@@ -2,10 +2,10 @@ const { addonBuilder } = require("stremio-addon-sdk");
 const engine = require("./engine");
 
 const manifest = {
-    id: "org.stremio.arsasubs.v6.final", 
-    version: "6.0.0",
-    name: "AR.SA Smart-Sync",
-    description: "مزامنة ذكية (⭐) تعتمد على اسم الملف وأول نطق للكلام",
+    id: "org.stremio.arsasubs.v7.final", // تحديث النسخة لمسح الكاش القديم
+    version: "7.0.0",
+    name: "AR.SA Ultimate-Sync",
+    description: "ترجمات أصلية + ترجمة فورية بالذكاء الاصطناعي (AI) للأفلام النادرة",
     resources: ["subtitles"],
     types: ["movie", "series"],
     catalogs: [],
@@ -18,20 +18,31 @@ builder.defineSubtitlesHandler(async (args) => {
     const { id, extra } = args;
     const videoFileName = extra.filename || ""; 
 
-    console.log(`[STREMIO] طلب جديد للفيلم: ${id} | الملف: ${videoFileName}`);
+    console.log(`[STREMIO] طلب لفيلم: ${id} | الملف: ${videoFileName}`);
 
     try {
+        // استدعاء المحرك الذي يبحث في القاعدة ثم المصادر
         const subtitlesList = await engine.getSyncedSubtitles(id, videoFileName);
 
         if (subtitlesList && subtitlesList.length > 0) {
             const domain = "chb-gy3n.onrender.com";
+            
             return {
-                subtitles: subtitlesList.map(sub => ({
-                    id: sub.fileId,
-                    lang: "ar-sa",
-                    url: `https://${domain}/sub/${sub.fileId}.srt`,
-                    label: sub.isMatch ? `⭐ ar.sa | ${sub.label}` : `🇸🇦 ar.sa | ${sub.label}`
-                }))
+                subtitles: subtitlesList.map(sub => {
+                    // إضافة إيموجي الروبوت 🤖 للترجمة المترجمة آلياً
+                    // وإضافة النجمة ⭐ للنسخة المزامنة مع ملف المستخدم
+                    let label = `ar.sa | ${sub.label}`;
+                    
+                    if (sub.isAI) label = `🤖 AI | ${sub.label}`;
+                    if (sub.isMatch) label = `⭐ ${label}`;
+
+                    return {
+                        id: sub.fileId,
+                        lang: "ar-sa",
+                        url: `https://${domain}/sub/${sub.fileId}.srt`,
+                        label: label
+                    };
+                })
             };
         }
     } catch (e) {
