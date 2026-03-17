@@ -2,9 +2,9 @@ const { addonBuilder } = require("stremio-addon-sdk");
 const engine = require("./engine");
 
 const manifest = {
-    id: "org.stremio.arsasubs.premium", 
-    version: "2.7.0", 
-    name: "AR.SA Subtitles",
+    id: "org.stremio.arsasubs.v3.new", 
+    version: "3.0.0", 
+    name: "AR.SA Subtitles V3",
     description: "إضافة الترجمة الاحترافية - قسم ar.sa",
     resources: ["subtitles"],
     types: ["movie", "series"],
