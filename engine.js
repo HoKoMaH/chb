@@ -1,7 +1,7 @@
 const scraper = require('./scraper');
 const mongoose = require('mongoose');
 
-// 1. تعريف الـ Schema فوراً داخل الملف لضمان استقرار الموديل
+// تعريف الـ Schema لضمان عدم حدوث MissingSchemaError
 const SubtitleSchema = new mongoose.Schema({
     fileId: { type: String, unique: true },
     imdbId: String,
@@ -11,43 +11,51 @@ const SubtitleSchema = new mongoose.Schema({
     createdAt: { type: Date, expires: '15d', default: Date.now }
 });
 
-// 2. محاولة جلب الموديل إذا كان مسجلاً، وإذا لم يكن، نقوم بتسجيله فوراً
 const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
 
+/**
+ * وظيفة جلب الترجمات المزامنة
+ * @param {string} imdbId - معرف الفيلم أو المسلسل
+ * @param {string} videoFileName - اسم ملف الفيديو المشغل حالياً (للمطابقة)
+ */
 async function getSyncedSubtitles(imdbId, videoFileName) {
-    console.log(`\n[ENGINE-LOG] 🧐 فحص المخزون لـ: ${imdbId}`);
+    console.log(`\n[ENGINE] 🎯 جاري البحث عن أفضل مطابقة لـ: ${videoFileName}`);
     
     try {
+        // 1. البحث في الكاش أولاً
         const cachedSubs = await Subtitle.find({ imdbId: imdbId });
         
         if (cachedSubs && cachedSubs.length > 0) {
-            console.log(`[ENGINE-CACHE] 📦 وجدنا ${cachedSubs.length} ملفات في الكاش. يتم التحقق من المطابقة...`);
+            console.log(`[ENGINE-CACHE] 📦 تم العثور على ${cachedSubs.length} ملفات مخزنة.`);
             return cachedSubs.map(sub => ({
                 fileId: sub.fileId,
                 label: sub.label,
                 isAI: sub.isAI,
-                isMatch: (videoFileName || "").toLowerCase().includes((sub.label || "").toLowerCase())
+                // فحص المطابقة مع الملف الحالي لتمييزها بنجمة ⭐
+                isMatch: (videoFileName || "").toLowerCase().includes((sub.label || "").toLowerCase().split('.')[0])
             }));
         }
 
-        console.log(`[ENGINE-SEARCH] 🌐 الكاش فارغ. جاري جلب ترجمات من المصدر الخارجي...`);
-        const allSubs = await scraper.fetchAllPossibleSubs(imdbId);
+        // 2. إذا لم يوجد كاش، نطلب من السكرابر البحث "بشكل مطابق"
+        console.log(`[ENGINE-REMOTE] 🌐 جاري البحث الخارجي والترجمة الذكية...`);
+        const allSubs = await scraper.fetchAllPossibleSubs(imdbId, videoFileName);
         
         if (!allSubs || allSubs.length === 0) {
-            console.log(`[ENGINE-EMPTY] ⚠️ لم يتم العثور على أي نتائج لهذا المحتوى.`);
+            console.log(`[ENGINE-EMPTY] ⚠️ لا توجد نتائج مطابقة نهائياً.`);
             return [];
         }
 
         let results = [];
         for (let i = 0; i < allSubs.length; i++) {
             const sub = allSubs[i];
-            const fileId = `${imdbId.replace(/:/g, '_')}_v${i + 1}_smart`;
+            // تنظيف الـ ID ليكون صالحاً كـ URL
+            const cleanId = imdbId.replace(/:/g, '_');
+            const fileId = `${cleanId}_v${i + 1}_smart`;
 
-            const videoLower = (videoFileName || "").toLowerCase();
-            const releaseKeywords = (sub.releaseName || "").toLowerCase().split(/[\s.-]+/);
-            const isMatch = videoLower && releaseKeywords.some(kw => kw.length > 3 && videoLower.includes(kw));
+            // تحديد هل هذه النسخة هي الأنسب للمستخدم حالياً؟
+            const isMatch = (videoFileName || "").toLowerCase().includes((sub.releaseName || "").toLowerCase().split('.')[0]);
 
-            console.log(`[ENGINE-SAVE] 💾 حفظ ومعالجة: ${sub.releaseName} (AI: ${sub.source === "AI"})`);
+            console.log(`[ENGINE-SAVE] 💾 حفظ: ${sub.releaseName} | AI: ${sub.source === "AI"}`);
             
             await Subtitle.findOneAndUpdate(
                 { fileId: fileId },
@@ -60,12 +68,19 @@ async function getSyncedSubtitles(imdbId, videoFileName) {
                 { upsert: true, new: true }
             );
             
-            results.push({ fileId, label: sub.releaseName, isMatch, isAI: sub.source === "AI" });
+            results.push({ 
+                fileId, 
+                label: sub.releaseName, 
+                isMatch, 
+                isAI: sub.source === "AI" 
+            });
         }
         
+        // ترتيب النتائج بحيث تظهر النسخة المطابقة في الأعلى
         return results.sort((a, b) => b.isMatch - a.isMatch);
+
     } catch (e) {
-        console.error(`[ENGINE-CRITICAL] ❌ خطأ أثناء معالجة المحرك: ${e.message}`);
+        console.error(`[ENGINE-CRITICAL] ❌ فشل في المحرك: ${e.message}`);
         return [];
     }
 }
