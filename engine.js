@@ -1,20 +1,9 @@
 const scraper = require('./scraper');
 const mongoose = require('mongoose');
 
-// تعريف الـ Schema لضمان عدم وجود MissingSchemaError
-const SubtitleSchema = new mongoose.Schema({
-    fileId: { type: String, unique: true },
-    imdbId: String,
-    arabicText: String,
-    label: String,
-    createdAt: { type: Date, expires: '7d', default: Date.now }
-});
-
-// استدعاء الموديل بطريقة آمنة (إذا كان موجوداً استخدمه، وإذا لا انشئه)
-const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
+const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle');
 
 async function getSyncedSubtitles(imdbId, videoFileName) {
-    console.log(`[ENGINE] 🧐 فحص المزامنة لملف: ${videoFileName}`);
     try {
         const allSubs = await scraper.fetchAllPossibleSubs(imdbId);
         if (!allSubs || allSubs.length === 0) return [];
@@ -24,17 +13,13 @@ async function getSyncedSubtitles(imdbId, videoFileName) {
             const sub = allSubs[i];
             const fileId = `${imdbId}_v${i + 1}_smart`;
 
-            // منطق المطابقة الذكية
-            const releaseNameLower = sub.releaseName.toLowerCase();
-            const videoFileNameLower = videoFileName.toLowerCase();
-            
-            // كلمات مفتاحية للمطابقة (CiNEPHiLES, YTS, BluRay, إلخ)
-            const releaseKeywords = releaseNameLower.split(/[\s.-]+/);
-            const isMatch = videoFileNameLower && releaseKeywords.some(kw => 
-                kw.length > 3 && videoFileNameLower.includes(kw)
+            // مطابقة اسم النسخة مع اسم ملف الفيديو
+            const videoLower = videoFileName.toLowerCase();
+            const releaseKeywords = sub.releaseName.toLowerCase().split(/[\s.-]+/);
+            const isMatch = videoLower && releaseKeywords.some(kw => 
+                kw.length > 3 && videoLower.includes(kw)
             );
 
-            // استخدام المتغير Subtitle المعرف أعلاه
             await Subtitle.findOneAndUpdate(
                 { fileId: fileId },
                 { 
@@ -45,20 +30,15 @@ async function getSyncedSubtitles(imdbId, videoFileName) {
                 { upsert: true, new: true }
             );
             
-            results.push({ 
-                fileId: fileId, 
-                label: sub.releaseName, 
-                isMatch: isMatch 
-            });
+            results.push({ fileId, label: sub.releaseName, isMatch });
         }
         
-        // ترتيب النتائج بحيث تظهر ⭐ أولاً
+        // جلب النسخة المطابقة للأعلى
         return results.sort((a, b) => b.isMatch - a.isMatch);
-
     } catch (e) {
-        console.error(`[ENGINE-ERROR] ❌ فشل في المحرك: ${e.message}`);
+        console.error(`[ENGINE-ERROR] ${e.message}`);
+        return [];
     }
-    return [];
 }
 
 module.exports = { getSyncedSubtitles };
