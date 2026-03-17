@@ -1,7 +1,17 @@
 const scraper = require('./scraper');
 const mongoose = require('mongoose');
 
-const Subtitle = mongoose.models.Subtitle;
+// تعريف الـ Schema لضمان عدم وجود MissingSchemaError
+const SubtitleSchema = new mongoose.Schema({
+    fileId: { type: String, unique: true },
+    imdbId: String,
+    arabicText: String,
+    label: String,
+    createdAt: { type: Date, expires: '7d', default: Date.now }
+});
+
+// استدعاء الموديل بطريقة آمنة (إذا كان موجوداً استخدمه، وإذا لا انشئه)
+const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
 
 async function getSyncedSubtitles(imdbId, videoFileName) {
     console.log(`[ENGINE] 🧐 فحص المزامنة لملف: ${videoFileName}`);
@@ -14,12 +24,17 @@ async function getSyncedSubtitles(imdbId, videoFileName) {
             const sub = allSubs[i];
             const fileId = `${imdbId}_v${i + 1}_smart`;
 
-            // خوارزمية مطابقة بسيطة: هل كلمات اسم النسخة موجودة في اسم ملف الفيديو؟
-            const releaseKeywords = sub.releaseName.toLowerCase().split(/[\s.]+/);
-            const isMatch = videoFileName && releaseKeywords.some(kw => 
-                kw.length > 2 && videoFileName.toLowerCase().includes(kw)
+            // منطق المطابقة الذكية
+            const releaseNameLower = sub.releaseName.toLowerCase();
+            const videoFileNameLower = videoFileName.toLowerCase();
+            
+            // كلمات مفتاحية للمطابقة (CiNEPHiLES, YTS, BluRay, إلخ)
+            const releaseKeywords = releaseNameLower.split(/[\s.-]+/);
+            const isMatch = videoFileNameLower && releaseKeywords.some(kw => 
+                kw.length > 3 && videoFileNameLower.includes(kw)
             );
 
+            // استخدام المتغير Subtitle المعرف أعلاه
             await Subtitle.findOneAndUpdate(
                 { fileId: fileId },
                 { 
@@ -27,21 +42,21 @@ async function getSyncedSubtitles(imdbId, videoFileName) {
                     arabicText: sub.content, 
                     label: sub.releaseName 
                 },
-                { upsert: true }
+                { upsert: true, new: true }
             );
             
             results.push({ 
                 fileId: fileId, 
                 label: sub.releaseName, 
-                isMatch: isMatch // إرسال نتيجة المطابقة للـ Addon
+                isMatch: isMatch 
             });
         }
         
-        // ترتيب النتائج بحيث تظهر النسخة المطابقة (⭐) في الأعلى
+        // ترتيب النتائج بحيث تظهر ⭐ أولاً
         return results.sort((a, b) => b.isMatch - a.isMatch);
 
     } catch (e) {
-        console.error(`[ENGINE-ERROR] ${e.message}`);
+        console.error(`[ENGINE-ERROR] ❌ فشل في المحرك: ${e.message}`);
     }
     return [];
 }
