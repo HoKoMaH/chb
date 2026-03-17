@@ -3,7 +3,7 @@ const engine = require("./engine");
 
 const manifest = {
     id: "org.arabic.autosync.subs",
-    version: "1.2.5", // رفع النسخة لإجبار ستريمو على التحديث
+    version: "1.2.6",
     name: "Arabic Auto-Sync",
     description: "ترجمة عربية مزمّنة تلقائياً",
     resources: ["subtitles"],
@@ -16,33 +16,24 @@ const builder = new addonBuilder(manifest);
 
 builder.defineSubtitlesHandler(async (args) => {
     const { id } = args;
-    console.log(`[STREMIO] استلام طلب لـ: ${id}`);
-
     try {
         const subtitleData = await engine.getSyncedSubtitles(id);
-
         if (subtitleData) {
-            // تأكد من استبدال الاسم أدناه باسم مشروعك في رندر
-            const domain = process.env.RENDER_EXTERNAL_HOSTNAME || "https://chb-gy3n.onrender.com";
-            const subUrl = `https://${domain}/sub/${id}.srt`;
-
-            console.log(`[STREMIO] إرسال رابط الترجمة: ${subUrl}`);
-
+            const domain = "chb-gy3n.onrender.com";
             return {
                 subtitles: [
                     {
                         id: `sync_${id}_ar`,
-                        lang: "ara", // الكود ara هو الأضمن لظهور كلمة Arabic
-                        url: subUrl,
+                        lang: "ara",
+                        url: `https://${domain}/sub/${id}.srt`,
                         label: `🇸🇦 العربية (مُزامنة: ${subtitleData.source})`
                     }
                 ]
             };
         }
     } catch (e) {
-        console.error(`[STREMIO-ERROR] فشل إرسال الرد: ${e.message}`);
+        console.error(e);
     }
-
     return { subtitles: [] };
 });
 
