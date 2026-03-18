@@ -10,7 +10,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 const app = express();
 
 /**
- * 1. إعدادات استقبال البيانات (حل مشكلة Payload Too Large)
+ * 1. إعدادات استقبال البيانات
  */
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -23,7 +23,7 @@ mongoose.connect(process.env.MONGO_URI)
     .catch(err => console.error("❌ [DATABASE] Error:", err));
 
 /**
- * 3. تعريف الموديل (Schema)
+ * 3. تعريف الموديل
  */
 const SubtitleSchema = new mongoose.Schema({
     fileId: { type: String, unique: true },
@@ -36,7 +36,7 @@ const SubtitleSchema = new mongoose.Schema({
 const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
 
 /**
- * 4. محرك بحث IMDb ID السريع
+ * 4. محرك بحث IMDb ID
  */
 app.get("/search-id", async (req, res) => {
     const query = req.query.q;
@@ -48,7 +48,7 @@ app.get("/search-id", async (req, res) => {
 });
 
 /**
- * 5. مسار تعديل المزامنة (Offset Sync) ⏱️
+ * 5. مسار تعديل المزامنة
  */
 app.post("/adjust-sync", async (req, res) => {
     try {
@@ -82,7 +82,7 @@ app.post("/adjust-sync", async (req, res) => {
 });
 
 /**
- * 6. واجهة التعديل والتعريب
+ * 6. واجهة التعديل
  */
 app.get("/edit/:fileId", async (req, res) => {
     const sub = await Subtitle.findOne({ fileId: req.params.fileId });
@@ -124,22 +124,22 @@ app.get("/edit/:fileId", async (req, res) => {
 });
 
 /**
- * 7. واجهة الإحصائيات (تصميم محدث مع رفع ذكي)
+ * 7. واجهة الإحصائيات
  */
 app.get("/stats", async (req, res) => {
     try {
         const totalSubs = await Subtitle.countDocuments();
         const aiSubs = await Subtitle.countDocuments({ isAI: true });
         const latestSubs = await Subtitle.find().sort({ createdAt: -1 }).limit(40);
-        const installUrl = \`stremio://\${process.env.RENDER_EXTERNAL_HOSTNAME || "chb-gy3n.onrender.com"}/manifest.json\`;
+        const installUrl = `stremio://${process.env.RENDER_EXTERNAL_HOSTNAME || "chb-gy3n.onrender.com"}/manifest.json`;
 
         let rows = latestSubs.map(sub => `
             <tr style="border-bottom: 1px solid #eee;">
-                <td style="padding: 12px;">\${sub.label}</td>
-                <td style="padding: 12px; text-align: center;">\${sub.isAI ? '🤖 AI' : '🇸🇦 أصلية'}</td>
+                <td style="padding: 12px;">${sub.label}</td>
+                <td style="padding: 12px; text-align: center;">${sub.isAI ? '🤖 AI' : '🇸🇦 أصلية'}</td>
                 <td style="padding: 12px; text-align: center;">
-                    <a href="/edit/\${sub.fileId}" style="text-decoration:none; background:#3498db; color:white; padding:5px 10px; border-radius:5px;">تعديل</a>
-                    <a href="/delete/\${sub.fileId}" onclick="return confirm('حذف؟')" style="text-decoration:none; background:#e74c3c; color:white; padding:5px 10px; border-radius:5px;">حذف</a>
+                    <a href="/edit/${sub.fileId}" style="text-decoration:none; background:#3498db; color:white; padding:5px 10px; border-radius:5px;">تعديل</a>
+                    <a href="/delete/${sub.fileId}" onclick="return confirm('حذف؟')" style="text-decoration:none; background:#e74c3c; color:white; padding:5px 10px; border-radius:5px;">حذف</a>
                 </td>
             </tr>`).join('');
 
@@ -155,18 +155,18 @@ app.get("/stats", async (req, res) => {
         <body>
             <div style="max-width: 900px; margin: auto; text-align:center;">
                 <h1>📊 لوحة تحكم AR.SA</h1>
-                <a href="\${installUrl}" style="background:#8e44ad; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold; display:inline-block; margin-bottom:20px;">+ تثبيت في Stremio</a>
+                <a href="${installUrl}" style="background:#8e44ad; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold; display:inline-block; margin-bottom:20px;">+ تثبيت في Stremio</a>
                 
                 <div class="stats-grid">
-                    <div class="card" style="border-top:4px solid #3498db;"><h3>الإجمالي</h3><p>\${totalSubs}</p></div>
-                    <div class="card" style="border-top:4px solid #2ecc71;"><h3>🤖 AI</h3><p>\${aiSubs}</p></div>
-                    <div class="card" style="border-top:4px solid #f1c40f;"><h3>أصلي</h3><p>\${totalSubs - aiSubs}</p></div>
+                    <div class="card" style="border-top:4px solid #3498db;"><h3>الإجمالي</h3><p>${totalSubs}</p></div>
+                    <div class="card" style="border-top:4px solid #2ecc71;"><h3>🤖 AI</h3><p>${aiSubs}</p></div>
+                    <div class="card" style="border-top:4px solid #f1c40f;"><h3>أصلي</h3><p>${totalSubs - aiSubs}</p></div>
                 </div>
 
                 <div class="grid-2">
                     <div class="card">
                         <h3>🔍 بحث IMDb ID</h3>
-                        <input id="q" placeholder="اسم الفيلم..."><button onclick="search()" style="background:#f1c40f;">بحث</button>
+                        <input id="q" placeholder="اسم الفيلم..."><button onclick="search()" style="background:#f1c40f; cursor:pointer;">بحث</button>
                         <div id="r" style="text-align:right; font-size:12px; margin-top:10px;"></div>
                     </div>
                     <div class="card">
@@ -183,14 +183,14 @@ app.get("/stats", async (req, res) => {
                             </div>
                             <input name="label" placeholder="اسم النسخة" required>
                             <input type="file" name="subtitleFile" accept=".srt" required>
-                            <button type="submit" style="background:#27ae60; color:white;">رفع واعتماد</button>
+                            <button type="submit" style="background:#27ae60; color:white; font-weight:bold; cursor:pointer;">رفع واعتماد</button>
                         </form>
                     </div>
                 </div>
 
                 <div class="card"><table style="width:100%; border-collapse:collapse;">
                     <thead style="background:#f8f9fa;"><tr><th>المحتوى</th><th>النوع</th><th>الإجراء</th></tr></thead>
-                    <tbody>\${rows}</tbody>
+                    <tbody>${rows}</tbody>
                 </table></div>
             </div>
             <script>
@@ -206,14 +206,14 @@ app.get("/stats", async (req, res) => {
 });
 
 /**
- * 8. المسارات الخلفية (Backend)
+ * 8. المسارات الخلفية
  */
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     try {
         let { imdbId, type, season, episode, label } = req.body;
         let finalId = imdbId.trim();
-        if (type === 'series') finalId = \`\${finalId}:\${season || 1}:\${episode || 1}\`;
-        const fileId = \`\${finalId.replace(/:/g, '_')}_manual_\${Date.now()}\`;
+        if (type === 'series') finalId = `${finalId}:${season || 1}:${episode || 1}`;
+        const fileId = `${finalId.replace(/:/g, '_')}_manual_${Date.now()}`;
         await Subtitle.findOneAndUpdate({ fileId }, {
             imdbId: finalId,
             arabicText: req.file.buffer.toString('utf8'),
