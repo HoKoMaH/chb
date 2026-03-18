@@ -10,7 +10,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 const app = express();
 
 /**
- * 1. إعدادات استقبال البيانات (حل مشكلة الحجم)
+ * 1. إعدادات استقبال البيانات (حل مشكلة الحجم والتعليق)
  */
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -27,7 +27,7 @@ mongoose.connect(process.env.MONGO_URI)
  */
 const SubtitleSchema = new mongoose.Schema({
     fileId: { type: String, unique: true },
-    imdbId: String, // هذا هو المعرف الفني (tt123:1:1)
+    imdbId: String,
     arabicText: String,
     label: String,
     isAI: { type: Boolean, default: false },
@@ -163,6 +163,7 @@ app.get("/stats", async (req, res) => {
         <body>
             <div style="max-width: 900px; margin: auto; text-align:center;">
                 <h1>📊 لوحة تحكم AR.SA الذكية</h1>
+                <p style="color:#d35400;">✨ ميزة التحويل العالمي: أي لغة ستتحول للعربية تلقائياً عند الرفع ✨</p>
                 <a href="${installUrl}" style="background:#8e44ad; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold; display:inline-block; margin-bottom:20px;">+ تثبيت في Stremio</a>
                 <div class="stats-grid">
                     <div class="card" style="border-top:4px solid #3498db;"><h3>الإجمالي</h3><p>${totalSubs}</p></div>
@@ -176,7 +177,7 @@ app.get("/stats", async (req, res) => {
                         <div id="r" style="text-align:right; font-size:12px; margin-top:10px; border:1px solid #eee; border-radius:8px; max-height:180px; overflow:auto;"></div>
                     </div>
                     <div class="card">
-                        <h3>📤 رفع يدوي ذكي</h3>
+                        <h3>📤 رفع يدوي (تعريب تلقائي)</h3>
                         <form action="/upload-manual" method="POST" enctype="multipart/form-data">
                             <select name="type" id="type" onchange="toggleFields()">
                                 <option value="movie">🎬 فيلم</option>
@@ -221,27 +222,35 @@ app.get("/stats", async (req, res) => {
 });
 
 /**
- * 8. المسارات الخلفية
+ * 8. المسارات الخلفية (تم دمج التعريب التلقائي هنا)
  */
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     try {
         let { imdbId, type, season, episode, label } = req.body;
         let cleanId = imdbId.trim();
-        
-        // بناء المعرف الفني (الربط مع ستريميو)
-        let technicalId = cleanId;
-        if (type === 'series') {
-            technicalId = `${cleanId}:${season || 1}:${episode || 1}`;
-        }
-
-        // معرف قاعدة البيانات الفريد
+        let technicalId = type === 'series' ? `${cleanId}:${season || 1}:${episode || 1}` : cleanId;
         const dbFileId = `${technicalId.replace(/:/g, '_')}_manual_${Date.now()}`;
 
+        let originalText = req.file.buffer.toString('utf8');
+        let finalText = originalText;
+        let isTranslated = false;
+
+        // فحص وجود الحروف العربية
+        const arabicPattern = /[\u0600-\u06FF]/;
+        if (!arabicPattern.test(originalText.substring(0, 2000))) {
+            console.log(`[GLOBAL-AI] 🌍 تم اكتشاف لغة أجنبية لـ ${technicalId}. جاري التحويل...`);
+            const translated = await translateToArabic(originalText);
+            if (translated) {
+                finalText = translated;
+                isTranslated = true;
+            }
+        }
+
         await Subtitle.findOneAndUpdate({ fileId: dbFileId }, {
-            imdbId: technicalId, // هذا ما يبحث عنه Stremio
-            arabicText: req.file.buffer.toString('utf8'),
-            label: label,
-            isAI: false
+            imdbId: technicalId,
+            arabicText: finalText,
+            label: isTranslated ? `🤖 AI | ${label}` : label,
+            isAI: isTranslated
         }, { upsert: true });
 
         res.redirect('/stats');
