@@ -258,7 +258,7 @@ app.get("/stats", async (req, res) => {
             </tr>`).join('');
 
         res.send(`
-        <html dir="rtl"><head><meta charset="UTF-8"><title>إدارة AR.SA</title>
+        <html dir="rtl"><head><meta charset="UTF-8"><title>إدارة ترجمات Stremio</title>
         <style>
             body { font-family: sans-serif; background: #f4f7f6; padding: 20px; }
             .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -271,7 +271,7 @@ app.get("/stats", async (req, res) => {
         </style></head>
         <body>
             <div style="max-width: 900px; margin: auto; text-align:center;">
-                <h1>📊 إدارة ترجمات AR.SA</h1>
+                <h1>📊 إدارة ترجمات Stremio</h1>
                 <a href="${installUrl}" style="background:#8e44ad; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold; display:inline-block; margin-bottom:20px;">+ تثبيت الإضافة في Stremio</a>
                 
                 <div class="stats-grid">
