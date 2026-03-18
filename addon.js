@@ -7,6 +7,8 @@ const manifest = {
     version: "1.6.0",
     name: "AR.SA AI Subtitles",
     description: "ترجمات عربية حصرية بالذكاء الاصطناعي 🇸🇦",
+    logo: "https://i.imgur.com/huxCzjK.png",
+    background: "https://i.imgur.com/Is1Dciv.png", // اختياري
     resources: ["subtitles"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
