@@ -2,10 +2,10 @@ const { addonBuilder } = require("stremio-addon-sdk");
 const engine = require("./engine");
 
 const manifest = {
-    id: "community.ar.sa.smart",
-    version: "8.1.0", // رفع النسخة ضروري جداً الآن
-    name: "AR.SA Smart Subtitles",
-    description: "البحث الشامل والتعريب الآلي لكافة الأفلام والمسلسلات",
+    id: "community.ar.sa.pro.ultimate", // تغيير الـ ID لكسر الكاش تماماً
+    version: "8.3.0",
+    name: "AR.SA Ultimate",
+    description: "محرك الترجمة العربية الاحترافي",
     resources: ["subtitles"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
@@ -18,27 +18,22 @@ builder.defineSubtitlesHandler(async (args) => {
     const { id, extra } = args;
     const videoFileName = extra.filename || "";
 
-    console.log(`[STREMIO] 📥 طلب جديد: ${id}`);
-
     try {
-        // ننتظر النتيجة لمدة 9 ثوانٍ كحد أقصى لكي لا نفقد الطلب
-        const subs = await Promise.race([
-            engine.getSyncedSubtitles(id, videoFileName),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 9000))
-        ]);
-
+        const subs = await engine.getSyncedSubtitles(id, videoFileName);
+        
         if (!subs || subs.length === 0) return { subtitles: [] };
 
         const formattedSubs = subs.map(sub => ({
             id: sub.fileId,
             url: `https://chb-gy3n.onrender.com/sub/${sub.fileId}.srt`,
-            name: `${sub.isAI ? '🤖' : '🇸🇦'} ${sub.label}`
+            // السر هنا: نضع اسم اللغة "AR.SA" بدلاً من "Arabic" لتظهر يساراً بشكل منفصل
+            lang: "AR.SA 🇸🇦", 
+            name: sub.label // اسم النسخة (BluRay, YTS, إلخ)
         }));
 
-        console.log(`[STREMIO] ✅ تم إرسال ${formattedSubs.length} ترجمة.`);
+        console.log(`[STREMIO] ✅ تم إرسال ${formattedSubs.length} ترجمة تحت قائمة AR.SA`);
         return { subtitles: formattedSubs };
     } catch (e) {
-        console.error(`[STREMIO-ERROR] ❌ خطأ: ${e.message}`);
         return { subtitles: [] };
     }
 });
