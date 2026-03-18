@@ -1,52 +1,50 @@
 const axios = require('axios');
-const AdmZip = require('adm-zip');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
-const { translate } = require('google-translate-api-x'); // محرك الطوارئ
+const { translate } = require('google-translate-api-x');
 
+// 1. استخراج المفاتيح الصالحة فقط
 const keys = [
     process.env.GEMINI_KEY_1, process.env.GEMINI_KEY_2, process.env.GEMINI_KEY_3,
     process.env.GEMINI_KEY_4, process.env.GEMINI_KEY_5, process.env.GEMINI_KEY_6,
     process.env.GEMINI_KEY_7
-].filter(k => k && k.length > 10); // التأكد من جودة المفتاح
+].filter(k => k && k.length > 20);
 
-let currentKeyIndex = 0;
-
-// دالة الترجمة بمحرك جوجل المجاني (عند فشل الـ API)
-async function translateWithGoogleFallback(textBatch) {
-    try {
-        const res = await translate(textBatch, { to: 'ar', forceBatch: true });
-        return res.map(item => item.text);
-    } catch (e) {
-        return textBatch; // العودة للأصل إذا انقطع كل شيء
-    }
-}
-
-async function translateWithGemini(textBatch, retryCount = 0) {
-    if (keys.length === 0 || retryCount > 1) {
-        // إذا لم توجد مفاتيح أو فشلت المحاولات، استخدم جوجل المجاني فوراً
-        return await translateWithGoogleFallback(textBatch);
-    }
-
-    const key = keys[currentKeyIndex];
-    currentKeyIndex = (currentKeyIndex + 1) % keys.length;
+/**
+ * دالة ترجمة الدفعة الواحدة (محاولة Gemini ثم Google كخيار احتياطي)
+ */
+async function translateBatch(batch, keyIndex) {
+    const key = keys[keyIndex % keys.length];
+    
+    // إذا لم توجد مفاتيح، نتوجه لجوجل فوراً
+    if (!key) return await translateWithGoogle(batch);
 
     try {
         const genAI = new GoogleGenerativeAI(key);
         const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
         
-        const result = await model.generateContent(`Translate to Arabic JSON array: ${JSON.stringify(textBatch)}`);
-        const response = await result.response;
-        let text = response.text().trim().replace(/```json/g, '').replace(/```/g, '');
+        // برومبت مكثف لسرعة الاستجابة
+        const prompt = `Translate to Arabic JSON array: ${JSON.stringify(batch)}`;
+        const result = await model.generateContent(prompt);
+        const text = (await result.response).text().trim().replace(/```json/g, '').replace(/```/g, '');
         
         const parsed = JSON.parse(text);
-        return (Array.isArray(parsed) && parsed.length === textBatch.length) ? parsed : textBatch;
+        return (Array.isArray(parsed) && parsed.length === batch.length) ? parsed : batch;
     } catch (e) {
-        console.error(`[SYSTEM] مفتاح رقم ${currentKeyIndex + 1} فشل، يحاول البديل...`);
-        // محاولة إعادة المحاولة مع المفتاح التالي، أو التحويل لجوجل
-        return await translateWithGemini(textBatch, retryCount + 1);
+        console.error(`⚠️ فشل المفتاح ${keyIndex + 1}، استخدام المحرك البديل...`);
+        return await translateWithGoogle(batch);
     }
 }
 
+async function translateWithGoogle(batch) {
+    try {
+        const res = await translate(batch, { to: 'ar', forceBatch: true });
+        return res.map(item => item.text);
+    } catch { return batch; }
+}
+
+/**
+ * المحرك النفاث (المعالجة المتوازية)
+ */
 async function translateToArabic(sourceSrt, onProgress = () => {}) {
     if (!sourceSrt) return "";
     const lines = sourceSrt.replace(/\r/g, '').split('\n');
@@ -61,23 +59,31 @@ async function translateToArabic(sourceSrt, onProgress = () => {}) {
         }
     }
 
-    const BATCH_SIZE = 30;
-    let finalResults = [];
+    const BATCH_SIZE = 40;
+    const totalBatches = Math.ceil(textToTranslate.length / BATCH_SIZE);
+    let allPromises = [];
 
+    // إرسال جميع الدفعات في وقت واحد (Parallel)
     for (let i = 0; i < textToTranslate.length; i += BATCH_SIZE) {
         const batch = textToTranslate.slice(i, i + BATCH_SIZE);
-        const translatedBatch = await translateWithGemini(batch);
-        finalResults.push(...translatedBatch);
-
-        if (onProgress) onProgress(Math.floor(((i + batch.length) / textToTranslate.length) * 100));
-        await new Promise(r => setTimeout(r, 400));
+        const keyIndex = i / BATCH_SIZE;
+        
+        // إضافة المهمة للمصفوفة لتعمل في الخلفية
+        allPromises.push(translateBatch(batch, keyIndex));
     }
 
+    // انتظار انتهاء جميع المهام وتحديث النسبة (وهمي سريع لراحة المستخدم)
+    onProgress(50); 
+    const results = await Promise.all(allPromises);
+    onProgress(100);
+
+    // دمج النتائج
+    const finalResults = [].concat(...results);
     for (let i = 0; i < mapIndices.length; i++) {
         lines[mapIndices[i]] = finalResults[i] || lines[mapIndices[i]];
     }
+
     return lines.join('\n');
 }
 
-module.exports = { translateToArabic, fetchAllPossibleSubs: async () => [] }; 
-// دالة fetchAllPossibleSubs تم اختصارها للتركيز على حل مشكلة الترجمة
+module.exports = { translateToArabic };
