@@ -10,7 +10,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 const app = express();
 
 /**
- * 1. إعدادات استقبال البيانات
+ * 1. إعدادات استقبال البيانات (دعم الملفات الضخمة)
  */
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
@@ -114,7 +114,7 @@ app.get("/edit/:fileId", async (req, res) => {
                 const a = document.createElement('a'); a.download = "${sub.label}.srt"; a.href = window.URL.createObjectURL(blob); a.click();
             }
             async function instantTranslate() {
-                if(!confirm('هل تريد تعريب هذا الملف يدوياً؟ قد يستغرق الأمر دقيقتين للملفات الضخمة.')) return;
+                if(!confirm('هل تريد تعريب هذا الملف يدوياً؟')) return;
                 document.getElementById('status').innerText = '⏳ جاري التعريب (راقب الـ Logs)...';
                 const res = await fetch('/instant-translate', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ text: document.getElementById('txt').value }) });
                 const result = await res.text();
@@ -160,8 +160,8 @@ app.get("/stats", async (req, res) => {
             input, select, button { width: 100%; padding: 10px; margin: 5px 0; border-radius: 8px; border: 1px solid #ddd; box-sizing: border-box; }
             .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
             .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-            .search-item { padding: 8px; border-bottom: 1px solid #f0f0f0; cursor: pointer; }
-            .search-item:hover { background: #f8f9fa; }
+            .search-item { padding: 8px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: 0.2s; }
+            .search-item:hover { background: #e8f4fd; }
         </style></head>
         <body>
             <div style="max-width: 900px; margin: auto; text-align:center;">
@@ -203,19 +203,30 @@ app.get("/stats", async (req, res) => {
             </div>
             <script>
                 function toggleFields(){ document.getElementById('sFields').style.display = document.getElementById('type').value==='series'?'flex':'none'; }
+                
                 async function search(){
                     const q = document.getElementById('q').value; if(!q) return;
+                    document.getElementById('r').innerHTML = '⏳ جاري البحث...';
                     const res = await fetch('/search-id?q=' + q); const data = await res.json();
                     document.getElementById('r').innerHTML = data.slice(0,8).map(i => {
-                        return \`<div class="search-item" onclick="copyToUpload('\${i.id}', '\${i.l}', \${i.q === 'TV series'})"><b>\${i.l} (\${i.y || ''})</b> - <code>\${i.id}</code></div>\`;
+                        return \`<div class="search-item" onclick="copyToUpload('\${i.id}', '\${i.l}', \${i.q === 'TV series'}, event)"><b>\${i.l} (\${i.y || ''})</b> - <code>\${i.id}</code></div>\`;
                     }).join('');
                 }
-                function copyToUpload(id, title, isSeries) {
+
+                function copyToUpload(id, title, isSeries, event) {
+                    // تعبئة البيانات
                     document.getElementById('manual_id').value = id;
                     document.getElementById('manual_label').value = title;
                     document.getElementById('type').value = isSeries ? 'series' : 'movie';
                     toggleFields();
+                    
+                    // نسخ الـ ID بصمت
                     navigator.clipboard.writeText(id);
+                    
+                    // تمييز بصري سريع بدلاً من الـ alert
+                    const items = document.querySelectorAll('.search-item');
+                    items.forEach(el => el.style.background = 'white');
+                    event.currentTarget.style.background = '#e8f4fd';
                 }
             </script>
         </body></html>`);
@@ -226,7 +237,6 @@ app.get("/stats", async (req, res) => {
  * 8. المسارات الخلفية
  */
 
-// مسار الرفع اليدوي (بدون أي تعريب تلقائي)
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     try {
         let { imdbId, type, season, episode, label } = req.body;
@@ -236,7 +246,7 @@ app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
 
         await Subtitle.findOneAndUpdate({ fileId: dbFileId }, {
             imdbId: technicalId,
-            arabicText: req.file.buffer.toString('utf8'), // الحفظ كما هو
+            arabicText: req.file.buffer.toString('utf8'),
             label: label,
             isAI: false
         }, { upsert: true });
@@ -245,23 +255,20 @@ app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     } catch (e) { res.status(500).send(e.message); }
 });
 
-// مسار التعريب الفوري (يُستدعى يدوياً من صفحة التعديل)
 app.post("/instant-translate", async (req, res) => {
     try {
-        // سيتم معالجة النص بواسطة scraper.js بنظام الأجزاء الصغيرة
         const translated = await translateToArabic(req.body.text);
         res.send(translated || req.body.text);
     } catch (e) { res.status(500).send(req.body.text); }
 });
 
 app.post("/save-edit", async (req, res) => {
-    // نتحقق إذا كان النص يحتوي على حروف عربية لنحدد إذا كان AI أم لا
     const hasArabic = /[\u0600-\u06FF]/.test(req.body.newText);
     await Subtitle.findOneAndUpdate({ fileId: req.body.fileId }, { 
         arabicText: req.body.newText,
-        isAI: !hasArabic // إذا عدلته وبقي بدون عربي يعتبر محمل كأجنبي، لكن المنطق يقتضي تعريبه يدوياً
+        isAI: hasArabic && req.body.newText.length > 100 // تعيين AI إذا تم تعريبه بنجاح
     });
-    res.send("<script>alert('تم الحفظ بنجاح!'); window.location.href='/stats';</script>");
+    res.send("<script>alert('تم الحفظ!'); window.location.href='/stats';</script>");
 });
 
 app.get("/delete/:fileId", async (req, res) => {
