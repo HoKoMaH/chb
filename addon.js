@@ -1,18 +1,16 @@
 const { addonBuilder } = require("stremio-addon-sdk");
 const engine = require("./engine");
 
-// 1. تعريف الـ Manifest (تأكد أن هذا الجزء موجود ومعرف بوضوح)
+// 1. تعريف الـ Manifest
 const manifest = {
     id: "community.ar.sa.smart",
-    version: "7.8.5",
+    version: "7.9.0",
     name: "AR.SA Smart Subtitles",
     description: "ترجمة عربية ذكية ومزامنة تلقائية لكافة المحتويات",
     resources: ["subtitles"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
-    catalogs: [],
-    background: "https://i.imgur.com/your_background.jpg", 
-    logo: "https://i.imgur.com/your_logo.png"
+    catalogs: []
 };
 
 // 2. بناء الإضافة
@@ -21,14 +19,16 @@ const builder = new addonBuilder(manifest);
 // 3. تعريف الـ Handler الخاص بالترجمة
 builder.defineSubtitlesHandler(async (args) => {
     const { id, extra } = args;
-    const videoFileName = extra.filename || ""; // استلام اسم ملف الفيديو للمزامنة
+    const videoFileName = extra.filename || ""; 
 
     console.log(`[ADDON] 📥 طلب ترجمة لـ: ${id} | الملف: ${videoFileName}`);
 
     try {
-        // استدعاء المحرك الذكي
+        // استدعاء المحرك الذكي من engine.js
         const subs = await engine.getSyncedSubtitles(id, videoFileName);
         
+        if (!subs || subs.length === 0) return { subtitles: [] };
+
         // تحويل النتائج لتنسيق ستريميو
         const formattedSubs = subs.map(sub => ({
             id: sub.fileId,
@@ -43,6 +43,6 @@ builder.defineSubtitlesHandler(async (args) => {
     }
 });
 
-// 4. التصدير (هذا السطر هو الأهم لحل الخطأ الخاص بك)
+// 4. التصدير (مهم جداً لحل خطأ Undefined config)
 const addonInterface = builder.getInterface();
 module.exports = addonInterface;
