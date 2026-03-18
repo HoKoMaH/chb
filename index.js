@@ -9,16 +9,25 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
 
+/**
+ * 1. إعدادات استقبال البيانات (حل مشكلة الحجم)
+ */
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+/**
+ * 2. الاتصال بقاعدة البيانات
+ */
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log("✅ [DATABASE] Connected"))
     .catch(err => console.error("❌ [DATABASE] Error:", err));
 
+/**
+ * 3. تعريف الموديل
+ */
 const SubtitleSchema = new mongoose.Schema({
     fileId: { type: String, unique: true },
-    imdbId: String,
+    imdbId: String, // هذا هو المعرف الفني (tt123:1:1)
     arabicText: String,
     label: String,
     isAI: { type: Boolean, default: false },
@@ -26,7 +35,9 @@ const SubtitleSchema = new mongoose.Schema({
 });
 const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
 
-// محرك بحث IMDb
+/**
+ * 4. محرك بحث IMDb ID
+ */
 app.get("/search-id", async (req, res) => {
     const query = req.query.q;
     if (!query) return res.json([]);
@@ -36,7 +47,9 @@ app.get("/search-id", async (req, res) => {
     } catch (e) { res.status(500).json([]); }
 });
 
-// مسار تعديل المزامنة
+/**
+ * 5. مسار تعديل المزامنة
+ */
 app.post("/adjust-sync", async (req, res) => {
     try {
         const { text, offset } = req.body;
@@ -67,7 +80,7 @@ app.post("/adjust-sync", async (req, res) => {
 });
 
 /**
- * واجهة التعديل مع زر التحميل الجديد 📥
+ * 6. واجهة التعديل والتحميل
  */
 app.get("/edit/:fileId", async (req, res) => {
     const sub = await Subtitle.findOne({ fileId: req.params.fileId });
@@ -77,57 +90,48 @@ app.get("/edit/:fileId", async (req, res) => {
         <div style="max-width:1000px; margin:auto; background:white; padding:25px; border-radius:15px; box-shadow:0 4px 15px rgba(0,0,0,0.1);">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
                 <h2 style="margin:0;">🛠️ محرر الترجمة: ${sub.label}</h2>
-                <button onclick="downloadSrt()" style="background:#34495e; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold;">📥 تحميل الملف (SRT)</button>
+                <button onclick="downloadSrt()" style="background:#34495e; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">📥 تحميل SRT</button>
             </div>
-            
             <div style="background:#f8f9fa; padding:15px; border-radius:10px; margin-bottom:15px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                <b>🤖 ذكاء اصطناعي:</b>
-                <button onclick="instantTranslate()" style="background:#8e44ad; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">تعريب النص</button>
+                <b>🤖 AI:</b> <button onclick="instantTranslate()" style="background:#8e44ad; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">تعريب</button>
                 <b style="margin-right:20px;">⏱️ مزامنة:</b>
                 <button onclick="shiftSync(-0.5)" style="background:#e67e22; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer;">-0.5s</button>
                 <button onclick="shiftSync(0.5)" style="background:#3498db; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer;">+0.5s</button>
                 <span id="status" style="color:#27ae60; font-weight:bold; margin-right:10px;"></span>
             </div>
-
             <form action="/save-edit" method="POST">
                 <input type="hidden" name="fileId" value="${sub.fileId}">
-                <textarea id="txt" name="newText" style="width:100%; height:60vh; padding:15px; border-radius:10px; border:1px solid #ddd; font-family:monospace; line-height:1.6;">${sub.arabicText}</textarea>
+                <textarea id="txt" name="newText" style="width:100%; height:60vh; padding:15px; border-radius:10px; font-family:monospace;">${sub.arabicText}</textarea>
                 <div style="text-align:center; margin-top:20px;">
-                    <button type="submit" style="background:#2ecc71; color:white; padding:15px 50px; border:none; border-radius:10px; cursor:pointer; font-weight:bold; font-size:16px;">حفظ واعتماد التعديلات ✅</button>
+                    <button type="submit" style="background:#2ecc71; color:white; padding:15px 50px; border:none; border-radius:10px; cursor:pointer; font-weight:bold;">حفظ ✅</button>
                     <a href="/stats" style="margin-right:20px; color:#666; text-decoration:none;">إلغاء</a>
                 </div>
             </form>
         </div>
         <script>
-            // دالة التحميل المباشر للجهاز
             function downloadSrt() {
-                const text = document.getElementById('txt').value;
-                const blob = new Blob([text], { type: 'text/plain' });
-                const anchor = document.createElement('a');
-                anchor.download = "${sub.label}.srt";
-                anchor.href = (window.webkitURL || window.URL).createObjectURL(blob);
-                anchor.dataset.downloadurl = ['text/plain', anchor.download, anchor.href].join(':');
-                anchor.click();
+                const blob = new Blob([document.getElementById('txt').value], { type: 'text/plain' });
+                const a = document.createElement('a'); a.download = "${sub.label}.srt"; a.href = window.URL.createObjectURL(blob); a.click();
             }
-
             async function instantTranslate() {
-                if(!confirm('هل تريد بدء التعريب الآلي؟')) return;
-                document.getElementById('status').innerText = '⏳ جاري التعريب..';
+                if(!confirm('بدء التعريب؟')) return;
+                document.getElementById('status').innerText = '⏳ جاري...';
                 const res = await fetch('/instant-translate', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ text: document.getElementById('txt').value }) });
                 const result = await res.text();
-                if(result) { document.getElementById('txt').value = result; document.getElementById('status').innerText = '✅ تم التعريب'; }
+                if(result) { document.getElementById('txt').value = result; document.getElementById('status').innerText = '✅ تم'; }
             }
             async function shiftSync(offset) {
-                document.getElementById('status').innerText = '⏳ معالجة التوقيت..';
                 const res = await fetch('/adjust-sync', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ text: document.getElementById('txt').value, offset }) });
                 const result = await res.text();
-                if(result) { document.getElementById('txt').value = result; document.getElementById('status').innerText = '✅ تم التعديل'; }
+                if(result) { document.getElementById('txt').value = result; document.getElementById('status').innerText = '✅ تم المزامنة'; }
             }
         </script>
     </body></html>`);
 });
 
-// واجهة الإحصائيات (stats)
+/**
+ * 7. واجهة الإحصائيات (Stats)
+ */
 app.get("/stats", async (req, res) => {
     try {
         const totalSubs = await Subtitle.countDocuments();
@@ -137,7 +141,7 @@ app.get("/stats", async (req, res) => {
 
         let rows = latestSubs.map(sub => `
             <tr style="border-bottom: 1px solid #eee;">
-                <td style="padding: 12px;">${sub.label}</td>
+                <td style="padding: 12px; font-size: 13px;">${sub.label} <br> <small style="color:#888;">ID: ${sub.imdbId}</small></td>
                 <td style="padding: 12px; text-align: center;">${sub.isAI ? '🤖 AI' : '🇸🇦 أصلية'}</td>
                 <td style="padding: 12px; text-align: center;">
                     <a href="/edit/${sub.fileId}" style="text-decoration:none; background:#3498db; color:white; padding:5px 10px; border-radius:5px;">تعديل</a>
@@ -153,13 +157,12 @@ app.get("/stats", async (req, res) => {
             input, select, button { width: 100%; padding: 10px; margin: 5px 0; border-radius: 8px; border: 1px solid #ddd; box-sizing: border-box; }
             .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
             .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-            .search-item { padding: 8px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: 0.2s; }
+            .search-item { padding: 8px; border-bottom: 1px solid #f0f0f0; cursor: pointer; }
             .search-item:hover { background: #f8f9fa; }
-            code { background: #eee; padding: 2px 6px; border-radius: 4px; color: #d63031; font-weight: bold; }
         </style></head>
         <body>
             <div style="max-width: 900px; margin: auto; text-align:center;">
-                <h1>📊 لوحة تحكم AR.SA</h1>
+                <h1>📊 لوحة تحكم AR.SA الذكية</h1>
                 <a href="${installUrl}" style="background:#8e44ad; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold; display:inline-block; margin-bottom:20px;">+ تثبيت في Stremio</a>
                 <div class="stats-grid">
                     <div class="card" style="border-top:4px solid #3498db;"><h3>الإجمالي</h3><p>${totalSubs}</p></div>
@@ -170,7 +173,7 @@ app.get("/stats", async (req, res) => {
                     <div class="card">
                         <h3>🔍 بحث IMDb ID</h3>
                         <input id="q" placeholder="اسم الفيلم..." onkeyup="if(event.keyCode===13) search()"><button onclick="search()" style="background:#f1c40f;">بحث</button>
-                        <div id="r" style="text-align:right; font-size:12px; margin-top:10px; border:1px solid #eee; border-radius:8px; max-height:200px; overflow:auto;"></div>
+                        <div id="r" style="text-align:right; font-size:12px; margin-top:10px; border:1px solid #eee; border-radius:8px; max-height:180px; overflow:auto;"></div>
                     </div>
                     <div class="card">
                         <h3>📤 رفع يدوي ذكي</h3>
@@ -179,14 +182,14 @@ app.get("/stats", async (req, res) => {
                                 <option value="movie">🎬 فيلم</option>
                                 <option value="series">📺 مسلسل</option>
                             </select>
-                            <input name="imdbId" id="manual_id" placeholder="IMDb ID (tt...)" required>
+                            <input name="imdbId" id="manual_id" placeholder="IMDb ID الرئيسي (tt...)" required>
                             <div id="sFields" style="display:none; gap:5px;">
                                 <input type="number" name="season" placeholder="موسم" style="width:50%">
                                 <input type="number" name="episode" placeholder="حلقة" style="width:50%">
                             </div>
                             <input name="label" id="manual_label" placeholder="اسم النسخة" required>
                             <input type="file" name="subtitleFile" accept=".srt" required>
-                            <button type="submit" style="background:#27ae60; color:white; font-weight:bold; cursor:pointer;">رفع واعتماد</button>
+                            <button type="submit" style="background:#27ae60; color:white; font-weight:bold;">رفع واعتماد</button>
                         </form>
                     </div>
                 </div>
@@ -210,26 +213,37 @@ app.get("/stats", async (req, res) => {
                     document.getElementById('type').value = isSeries ? 'series' : 'movie';
                     toggleFields();
                     navigator.clipboard.writeText(id);
-                    alert('✅ تم النسخ والتعبئة!');
+                    alert('✅ تم النسخ والتعبئة لـ: ' + title);
                 }
             </script>
         </body></html>`);
     } catch (e) { res.status(500).send("Error"); }
 });
 
-// المسارات الخلفية
+/**
+ * 8. المسارات الخلفية
+ */
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     try {
         let { imdbId, type, season, episode, label } = req.body;
-        let finalId = imdbId.trim();
-        if (type === 'series') finalId = `${finalId}:${season || 1}:${episode || 1}`;
-        const fileId = `${finalId.replace(/:/g, '_')}_manual_${Date.now()}`;
-        await Subtitle.findOneAndUpdate({ fileId }, {
-            imdbId: finalId,
+        let cleanId = imdbId.trim();
+        
+        // بناء المعرف الفني (الربط مع ستريميو)
+        let technicalId = cleanId;
+        if (type === 'series') {
+            technicalId = `${cleanId}:${season || 1}:${episode || 1}`;
+        }
+
+        // معرف قاعدة البيانات الفريد
+        const dbFileId = `${technicalId.replace(/:/g, '_')}_manual_${Date.now()}`;
+
+        await Subtitle.findOneAndUpdate({ fileId: dbFileId }, {
+            imdbId: technicalId, // هذا ما يبحث عنه Stremio
             arabicText: req.file.buffer.toString('utf8'),
             label: label,
             isAI: false
         }, { upsert: true });
+
         res.redirect('/stats');
     } catch (e) { res.status(500).send(e.message); }
 });
