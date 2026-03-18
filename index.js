@@ -10,7 +10,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 const app = express();
 
 /**
- * 1. إعدادات استقبال البيانات (دعم الملفات الضخمة)
+ * 1. إعدادات استقبال البيانات
  */
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
@@ -80,7 +80,7 @@ app.post("/adjust-sync", async (req, res) => {
 });
 
 /**
- * 6. واجهة التعديل والتحميل (مع زر التعريب اليدوي)
+ * 6. واجهة التعديل
  */
 app.get("/edit/:fileId", async (req, res) => {
     const sub = await Subtitle.findOne({ fileId: req.params.fileId });
@@ -133,7 +133,7 @@ app.get("/edit/:fileId", async (req, res) => {
 });
 
 /**
- * 7. لوحة التحكم الرئيسية (Stats)
+ * 7. لوحة التحكم (Stats) مع البحث التلقائي
  */
 app.get("/stats", async (req, res) => {
     try {
@@ -174,12 +174,12 @@ app.get("/stats", async (req, res) => {
                 </div>
                 <div class="grid-2">
                     <div class="card">
-                        <h3>🔍 البحث عن محتوى (IMDb)</h3>
-                        <input id="q" placeholder="اسم الفيلم أو المسلسل..." onkeyup="if(event.keyCode===13) search()"><button onclick="search()" style="background:#f1c40f;">بحث</button>
+                        <h3>🔍 البحث عن محتوى (تلقائي)</h3>
+                        <input id="q" placeholder="ابدأ بكتابة اسم الفيلم..." oninput="autoSearch()">
                         <div id="r" style="text-align:right; font-size:12px; margin-top:10px; border:1px solid #eee; border-radius:8px; max-height:180px; overflow:auto;"></div>
                     </div>
                     <div class="card">
-                        <h3>📤 رفع ملف يدوي (بدون تعريب)</h3>
+                        <h3>📤 رفع ملف يدوي</h3>
                         <form action="/upload-manual" method="POST" enctype="multipart/form-data">
                             <select name="type" id="type" onchange="toggleFields()">
                                 <option value="movie">🎬 فيلم</option>
@@ -202,28 +202,31 @@ app.get("/stats", async (req, res) => {
                 </table></div>
             </div>
             <script>
+                let timer;
                 function toggleFields(){ document.getElementById('sFields').style.display = document.getElementById('type').value==='series'?'flex':'none'; }
                 
-                async function search(){
-                    const q = document.getElementById('q').value; if(!q) return;
-                    document.getElementById('r').innerHTML = '⏳ جاري البحث...';
-                    const res = await fetch('/search-id?q=' + q); const data = await res.json();
-                    document.getElementById('r').innerHTML = data.slice(0,8).map(i => {
-                        return \`<div class="search-item" onclick="copyToUpload('\${i.id}', '\${i.l}', \${i.q === 'TV series'}, event)"><b>\${i.l} (\${i.y || ''})</b> - <code>\${i.id}</code></div>\`;
-                    }).join('');
+                // دالة البحث التلقائي بمجرد التوقف عن الكتابة
+                function autoSearch() {
+                    clearTimeout(timer);
+                    const q = document.getElementById('q').value;
+                    if(!q || q.length < 2) { document.getElementById('r').innerHTML = ''; return; }
+                    
+                    timer = setTimeout(async () => {
+                        document.getElementById('r').innerHTML = '⏳ جاري البحث...';
+                        const res = await fetch('/search-id?q=' + q);
+                        const data = await res.json();
+                        document.getElementById('r').innerHTML = data.slice(0,8).map(i => {
+                            return \`<div class="search-item" onclick="copyToUpload('\${i.id}', '\${i.l}', \${i.q === 'TV series'}, event)"><b>\${i.l} (\${i.y || ''})</b> - <code>\${i.id}</code></div>\`;
+                        }).join('');
+                    }, 500); // الانتظار لمدة 500 ملي ثانية
                 }
 
                 function copyToUpload(id, title, isSeries, event) {
-                    // تعبئة البيانات
                     document.getElementById('manual_id').value = id;
                     document.getElementById('manual_label').value = title;
                     document.getElementById('type').value = isSeries ? 'series' : 'movie';
                     toggleFields();
-                    
-                    // نسخ الـ ID بصمت
                     navigator.clipboard.writeText(id);
-                    
-                    // تمييز بصري سريع بدلاً من الـ alert
                     const items = document.querySelectorAll('.search-item');
                     items.forEach(el => el.style.background = 'white');
                     event.currentTarget.style.background = '#e8f4fd';
@@ -236,21 +239,18 @@ app.get("/stats", async (req, res) => {
 /**
  * 8. المسارات الخلفية
  */
-
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     try {
         let { imdbId, type, season, episode, label } = req.body;
         let cleanId = imdbId.trim();
         let technicalId = type === 'series' ? `${cleanId}:${season || 1}:${episode || 1}` : cleanId;
         const dbFileId = `${technicalId.replace(/:/g, '_')}_manual_${Date.now()}`;
-
         await Subtitle.findOneAndUpdate({ fileId: dbFileId }, {
             imdbId: technicalId,
             arabicText: req.file.buffer.toString('utf8'),
             label: label,
             isAI: false
         }, { upsert: true });
-
         res.redirect('/stats');
     } catch (e) { res.status(500).send(e.message); }
 });
@@ -266,7 +266,7 @@ app.post("/save-edit", async (req, res) => {
     const hasArabic = /[\u0600-\u06FF]/.test(req.body.newText);
     await Subtitle.findOneAndUpdate({ fileId: req.body.fileId }, { 
         arabicText: req.body.newText,
-        isAI: hasArabic && req.body.newText.length > 100 // تعيين AI إذا تم تعريبه بنجاح
+        isAI: hasArabic && req.body.newText.length > 100 
     });
     res.send("<script>alert('تم الحفظ!'); window.location.href='/stats';</script>");
 });
