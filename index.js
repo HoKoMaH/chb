@@ -40,25 +40,73 @@ const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', Subtitle
  */
 const commonCSS = `
 <style>
-    :root { --bg: #f4f7f6; --card: white; --text: #333; --border: #ddd; }
-    body.dark-mode { --bg: #121212; --card: #1e1e1e; --text: #e0e0e0; --border: #333; }
-    
-    body { font-family: sans-serif; background: var(--bg); color: var(--text); padding: 20px; transition: 0.3s; }
-    .card, .box { background: var(--card); padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid var(--border); }
-    input, select, textarea { width: 100%; padding: 12px; margin: 5px 0; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); box-sizing: border-box; }
-    
-    .night-toggle {
-        position: fixed; bottom: 20px; left: 20px; z-index: 1000;
-        width: 50px; height: 50px; border-radius: 50%;
-        background: #2c3e50; color: white; border: none; cursor: pointer;
-        font-size: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-        display: flex; align-items: center; justify-content: center;
+    :root { 
+        --bg: #f4f7f6; 
+        --card: #ffffff; 
+        --text: #2c3e50; 
+        --text-dim: #7f8c8d;
+        --border: #dfe6e9; 
+        --accent: #3498db;
     }
-    .btn { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; color: white; transition: 0.3s; text-decoration: none; display: inline-block; }
-    .btn:hover { opacity: 0.8; transform: translateY(-1px); }
-    table { width: 100%; border-collapse: collapse; text-align: right; }
-    th { background: rgba(0,0,0,0.05); padding: 10px; }
-    tr { border-bottom: 1px solid var(--border); }
+    
+    body.dark-mode { 
+        --bg: #121212; 
+        --card: #1e1e1e; 
+        --text: #ffffff; /* لون النص الأساسي في الوضع الليلي - أبيض ناصع */
+        --text-dim: #b2bec3; /* لون النصوص الفرعية - رمادي فاتح */
+        --border: #2d3436; 
+        --accent: #00cec9;
+    }
+    
+    body { 
+        font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+        background: var(--bg); 
+        color: var(--text); 
+        padding: 20px; 
+        transition: background 0.3s, color 0.3s; 
+        line-height: 1.6;
+    }
+    
+    h1, h2, h3 { color: var(--text); margin-bottom: 15px; }
+    
+    .card, .box { 
+        background: var(--card); 
+        padding: 20px; 
+        border-radius: 12px; 
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1); 
+        margin-bottom: 20px; 
+        border: 1px solid var(--border); 
+    }
+
+    /* تحسين وضوح النصوص داخل الجدول والمربعات */
+    small { color: var(--text-dim); font-size: 0.85rem; }
+    input, select, textarea { 
+        width: 100%; 
+        padding: 12px; 
+        margin: 8px 0; 
+        border-radius: 8px; 
+        border: 2px solid var(--border); 
+        background: var(--card); 
+        color: var(--text); 
+        font-size: 1rem;
+        outline: none;
+    }
+    
+    textarea:focus, input:focus { border-color: var(--accent); }
+
+    /* تحسين شكل الجدول */
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    th { text-align: right; padding: 12px; background: rgba(0,0,0,0.05); color: var(--text); }
+    body.dark-mode th { background: rgba(255,255,255,0.05); }
+    td { padding: 12px; border-bottom: 1px solid var(--border); color: var(--text); }
+
+    .night-toggle {
+        position: fixed; bottom: 25px; left: 25px; z-index: 1000;
+        width: 55px; height: 55px; border-radius: 50%;
+        background: var(--accent); color: white; border: none; cursor: pointer;
+        font-size: 24px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        display: flex; align-items: center; justify-content: center; transition: 0.3s;
+    }
 </style>
 `;
 
