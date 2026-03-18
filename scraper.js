@@ -2,7 +2,7 @@ const axios = require('axios');
 const AdmZip = require('adm-zip');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
-// 1. إعداد وتدوير المفاتيح (API Keys Rotation)
+// 1. إعداد تدوير المفاتيح (Key Rotation)
 const API_KEYS = [
     process.env.GEMINI_KEY_1,
     process.env.GEMINI_KEY_2,
@@ -11,27 +11,17 @@ const API_KEYS = [
     process.env.GEMINI_KEY_5,
     process.env.GEMINI_KEY_6,
     process.env.GEMINI_KEY_7
-].filter(k => k && k.trim() !== ""); // تصفية المفاتيح الفارغة
+].filter(k => k && k.trim() !== "");
 
 let currentKeyIndex = 0;
 
 /**
- * دالة لاختيار المفتاح التالي تلقائياً
- */
-function getNextApiKey() {
-    if (API_KEYS.length === 0) return null;
-    const key = API_KEYS[currentKeyIndex];
-    currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length;
-    return key;
-}
-
-/**
- * 2. المحرك الرئيسي للترجمة باستخدام Gemini AI
+ * محرك التعريب الذكي - إصدار Oregon المستقر
  */
 async function translateToArabic(sourceSrt, onProgress) {
     if (!sourceSrt) return null;
     if (API_KEYS.length === 0) {
-        console.error("❌ خطأ: لم يتم ضبط أي مفاتيح GEMINI_KEY في إعدادات البيئة (Environment Variables).");
+        console.error("❌ لم يتم العثور على مفاتيح GEMINI_KEY في إعدادات البيئة.");
         return sourceSrt;
     }
 
@@ -40,15 +30,15 @@ async function translateToArabic(sourceSrt, onProgress) {
     let batchTexts = [];
     let batchIndices = [];
     
-    // حجم الدفعة (Batch Size) - Gemini Flash مستقر جداً مع 30-40 سطر
-    const BATCH_SIZE = 35; 
+    // حجم دفعة متوازن لضمان عدم تجاوز حدود الـ Token
+    const BATCH_SIZE = 30; 
 
-    console.log(`[GEMINI] 🚀 بدء تعريب ${lines.length} سطر باستخدام ${API_KEYS.length} مفاتيح...`);
+    console.log(`[OREGON-NODE] 🌐 بدء التعريب باستخدام ${API_KEYS.length} مفاتيح في منطقة Oregon...`);
 
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i].trim();
 
-        // تصفية أسطر الحوار فقط (تجنب التوقيت والأرقام)
+        // تصفية أسطر الحوار فقط
         if (line && !line.includes('-->') && isNaN(line)) {
             batchTexts.push(line);
             batchIndices.push(i);
@@ -57,27 +47,22 @@ async function translateToArabic(sourceSrt, onProgress) {
         if (batchTexts.length === BATCH_SIZE || (i === lines.length - 1 && batchTexts.length > 0)) {
             let success = false;
             let retryCount = 0;
-            const maxRetries = API_KEYS.length * 2; // محاولة استهلاك المفاتيح مرتين قبل اليأس
+            const maxRetries = API_KEYS.length * 2;
 
             while (!success && retryCount < maxRetries) {
-                const activeKey = getNextApiKey();
+                const activeKey = API_KEYS[currentKeyIndex];
+                currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length; // التدوير للمفتاح التالي
+
                 try {
                     const genAI = new GoogleGenerativeAI(activeKey);
                     const model = genAI.getGenerativeModel({ 
                         model: "gemini-1.5-flash",
-                        generationConfig: { temperature: 0.3 } // درجة حرارة منخفضة لترجمة أكثر دقة
+                        generationConfig: { temperature: 0.2 } 
                     });
 
-                    const prompt = `Translate these movie subtitle lines to Arabic. 
-                    Rules:
-                    1. Return ONLY the translated text.
-                    2. One line of translation per one line of input.
-                    3. Maintain the same order.
-                    4. Keep it cinematic and natural Arabic.
-                    
-                    Text to translate:
-                    ${batchTexts.join('\n')}`;
+                    const prompt = `Translate these movie subtitle lines to Arabic. Return ONLY the translated text, one line per input. Maintain the same order:\n\n${batchTexts.join('\n')}`;
 
+                    // محاولة الترجمة مع مهلة زمنية (Timeout)
                     const result = await model.generateContent(prompt);
                     const response = await result.response;
                     const translatedText = response.text().trim();
@@ -85,15 +70,26 @@ async function translateToArabic(sourceSrt, onProgress) {
                     if (translatedText) {
                         const translatedParts = translatedText.split('\n');
                         for (let j = 0; j < batchIndices.length; j++) {
-                            // دمج الترجمة أو العودة للنص الأصلي في حال فشل سطر معين
                             translatedLines[batchIndices[j]] = translatedParts[j]?.trim() || batchTexts[j];
                         }
                         success = true;
                     }
                 } catch (e) {
                     retryCount++;
-                    console.error(`[⚠️ KEY ERROR] Key #${currentKeyIndex + 1} failed. Reason: ${e.message.substring(0, 60)}...`);
-                    // انتظار قصير قبل التبديل للمفتاح التالي
+                    const errorMsg = e.message.toLowerCase();
+                    
+                    console.error(`[⚠️ KEY #${currentKeyIndex + 1} FAILED] Reason: ${e.message.substring(0, 80)}...`);
+
+                    // إذا كان الخطأ بسبب ضغط الطلبات (429)، ننتظر قليلاً
+                    if (errorMsg.includes("429") || errorMsg.includes("quota")) {
+                        await new Promise(r => setTimeout(r, 3000));
+                    } 
+                    // إذا كان الخطأ بسبب الموقع الجغرافي (رغم أن Oregon مدعومة)
+                    else if (errorMsg.includes("location not supported")) {
+                        console.error("🚨 الخطأ لا يزال يشير للموقع الجغرافي! تأكد من تغيير المنطقة في Render.");
+                        break; 
+                    }
+                    
                     await new Promise(r => setTimeout(r, 1000));
                 }
             }
@@ -101,7 +97,6 @@ async function translateToArabic(sourceSrt, onProgress) {
             batchTexts = [];
             batchIndices = [];
 
-            // تحديث شريط التقدم في الواجهة
             if (onProgress) {
                 let percent = Math.floor((i / lines.length) * 100);
                 onProgress(percent);
@@ -109,27 +104,22 @@ async function translateToArabic(sourceSrt, onProgress) {
         }
     }
 
-    console.log(`[GEMINI] ✅ تمت عملية التعريب بنجاح.`);
+    console.log(`[OREGON-NODE] ✅ اكتمل التعريب.`);
     return translatedLines.join('\n');
 }
 
 /**
- * 3. جلب الترجمات من مصدر خارجي (SubDL)
+ * وظائف جلب وفك ضغط الترجمة
  */
 async function fetchAllPossibleSubs(fullId, videoFileName) {
     const SUBDL_API_KEY = process.env.SUBDL_API_KEY;
-    if (!SUBDL_API_KEY) {
-        console.error("❌ خطأ: SUBDL_API_KEY مفقود.");
-        return [];
-    }
-
     const [imdbId, season, episode] = fullId.split(':');
     
     try {
         let baseUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${SUBDL_API_KEY}`;
         if (season && episode) baseUrl += `&season=${season}&episode=${episode}`;
 
-        // محاولة جلب ترجمة عربية جاهزة أولاً
+        // محاولة جلب ترجمة عربية جاهزة
         const arRes = await axios.get(`${baseUrl}&languages=ar`).catch(() => null);
         if (arRes?.data?.subtitles?.length > 0) {
             const s = arRes.data.subtitles[0];
@@ -137,26 +127,21 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
             if (content) return [{ content, releaseName: s.release_name, source: "Original" }];
         }
 
-        // إذا لم توجد، نجلب الإنجليزية ونترجمها بـ Gemini
+        // تعريب النسخة الإنجليزية بـ Gemini
         const enRes = await axios.get(`${baseUrl}&languages=en`).catch(() => null);
         if (enRes?.data?.subtitles?.length > 0) {
             const s = enRes.data.subtitles[0];
             const content = await downloadAndUnzip(s.url);
             if (content) {
-                console.log(`[AUTO-AI] 🤖 لا يوجد ترجمة عربية.. بدء تعريب نسخة: ${s.release_name}`);
+                console.log(`[AUTO-AI] 🤖 بدء تعريب نسخة: ${s.release_name}`);
                 const translated = await translateToArabic(content, null);
                 if (translated) return [{ content: translated, releaseName: s.release_name, source: "AI (Gemini)" }];
             }
         }
-    } catch (e) { 
-        console.error(`[SCRAPER] Error fetching subs: ${e.message}`); 
-    }
+    } catch (e) { console.error(`[SCRAPER] Error: ${e.message}`); }
     return [];
 }
 
-/**
- * 4. تحميل وفك ضغط الملفات
- */
 async function downloadAndUnzip(subUrl) {
     try {
         const res = await axios.get(`https://dl.subdl.com${subUrl}`, { 
@@ -166,9 +151,7 @@ async function downloadAndUnzip(subUrl) {
         const zip = new AdmZip(Buffer.from(res.data));
         const srtEntry = zip.getEntries().find(e => e.entryName.toLowerCase().endsWith('.srt'));
         return srtEntry ? srtEntry.getData().toString('utf8') : null;
-    } catch (err) { 
-        return null; 
-    }
+    } catch (err) { return null; }
 }
 
 module.exports = { fetchAllPossibleSubs, translateToArabic };
