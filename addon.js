@@ -2,25 +2,19 @@ const { addonBuilder } = require("stremio-addon-sdk");
 const mongoose = require('mongoose');
 const { getSmartSubtitles } = require("./scraper");
 
-// 1. إعداد مانيفست الإضافة
 const manifest = {
     id: "community.ar_sa.addon",
-    version: "1.2.0",
-    name: "AR.SA Subtitles AI",
-    description: "البحث عن ترجمات عربية جاهزة أو تعريب الترجمات الإنجليزية فورياً باستخدام AI",
-    logo: "https://i.imgur.com/83pL6D6.png", // يمكنك تغيير الرابط لشعارك
+    version: "1.3.0",
+    name: "AR.SA AI Subtitles",
+    description: "قائمة ترجمة خاصة وحصرية باستخدام الذكاء الاصطناعي",
     resources: ["subtitles"],
     types: ["movie", "series"],
-    catalogs: [],
-    background: "https://i.imgur.com/S99S46H.jpeg",
     idPrefixes: ["tt"]
 };
 
 const builder = new addonBuilder(manifest);
 
-/**
- * تعريف موديل قاعدة البيانات لضمان الوصول للبيانات المخزنة
- */
+// تعريف الموديل (لضمان عمل الهاندلر)
 const SubtitleSchema = new mongoose.Schema({
     fileId: { type: String, unique: true },
     imdbId: String,
@@ -31,41 +25,34 @@ const SubtitleSchema = new mongoose.Schema({
 });
 const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
 
-/**
- * معالج طلبات الترجمة (Subtitles Handler)
- */
 builder.defineSubtitlesHandler(async (args) => {
-    const { id } = args; // معرف الفيلم tt123456 أو الحلقة tt123456:1:1
-    console.log(`🔍 طلب ترجمة للمعرف: ${id}`);
+    const { id } = args;
 
     try {
-        // استدعاء الوظيفة الذكية من السكريبت
-        // تتبع النظام: Subdl Arabic -> Database -> Subdl English + AI
         const results = await getSmartSubtitles(id, Subtitle);
 
-        if (!results || results.length === 0) {
-            console.log("⚠️ لم يتم العثور على أي ترجمات لهذا المحتوى.");
-            return { subtitles: [] };
-        }
+        if (!results || results.length === 0) return { subtitles: [] };
 
-        // تحويل النتائج إلى الصيغة التي يفهمها Stremio
         const subtitles = results.map((sub, index) => {
-            // نستخدم المعرف الموجود أو ننشئ واحدًا مؤقتًا
-            const fileId = sub.fileId || `${id.replace(/:/g, '_')}_res_${index}`;
+            const fileId = sub.fileId || `${id.replace(/:/g, '_')}_${index}`;
             
             return {
-                id: fileId,
-                // الرابط يشير إلى سيرفرك على Render ليقوم بتقديم ملف الـ SRT
-                url: `https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'chb-gy3n.onrender.com'}/sub/${fileId}.srt`,
-                lang: "Arabic",
-                label: `${sub.label} ${sub.isAI ? '✨ [AI]' : '✅ [Official]'}`
+                id: `arsa_${fileId}`,
+                url: `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/sub/${fileId}.srt`,
+                /** * التعديل هنا: 
+                 * باستخدام 'ar-SA' أو 'Arabic (AR-SA)'، سيقوم ستريميو بإظهارها 
+                 * كخيار منفصل تماماً عن خيار 'Arabic' التقليدي.
+                 */
+                lang: "ar-SA", 
+                // الوسم الذي سيظهر بجانب العلم أو رمز اللغة
+                label: `🇸🇦 ${sub.label} ${sub.isAI ? '[AI]' : '[OFFICIAL]'}`
             };
         });
 
         return { subtitles };
 
     } catch (error) {
-        console.error("❌ خطأ في معالج الترجمة:", error.message);
+        console.error("Handler Error:", error);
         return { subtitles: [] };
     }
 });
