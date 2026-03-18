@@ -195,16 +195,29 @@ app.get("/stats", async (req, res) => {
     const latest = await Subtitle.find().sort({ createdAt: -1 }).limit(50);
     const installUrl = `stremio://${process.env.RENDER_EXTERNAL_HOSTNAME || "chb-gy3n.onrender.com"}/manifest.json`;
 
-    let rows = latest.map(s => `
-        <tr>
-            <td style="padding:10px;">${s.label}<br><small style="opacity:0.6;">${s.imdbId}</small></td>
-            <td style="text-align:center;">${s.isAI ? '🤖 AI' : '🇸🇦 أصلية'}</td>
-            <td style="text-align:center;">
-                <a href="/edit/${s.fileId}" class="btn" style="background:#3498db; font-size:12px; padding:5px 10px;">تعديل</a>
-                <a href="/delete/${s.fileId}" class="btn" style="background:#e74c3c; font-size:12px; padding:5px 10px;">حذف</a>
+let rows = latest.map(s => {
+        // تنظيف اسم الملف ليظهر بشكل أجمل
+        const shortLabel = s.label.length > 50 ? s.label.substring(0, 47) + "..." : s.label;
+        const timeAgo = new Date(s.createdAt).toLocaleDateString('ar-EG');
+        
+        return `
+        <tr style="border-bottom: 1px solid var(--border);">
+            <td style="padding:12px;">
+                <div style="font-weight:bold; color:var(--text);">${shortLabel}</div>
+                <small style="opacity:0.6;">🆔 ${s.imdbId} | 📅 ${timeAgo}</small>
             </td>
-        </tr>`).join('');
-
+            <td style="text-align:center;">
+                <span style="background:${s.isAI ? '#8e44ad' : '#27ae60'}; color:white; padding:2px 8px; border-radius:4px; font-size:11px;">
+                    ${s.isAI ? '🤖 AI' : '🇸🇦 أصلية'}
+                </span>
+            </td>
+            <td style="text-align:center; white-space:nowrap;">
+                <a href="/edit/${s.fileId}" class="btn" style="background:#3498db; font-size:12px; padding:5px 12px;">تعديل</a>
+                <a href="/delete/${s.fileId}" onclick="return confirm('حذف؟')" class="btn" style="background:#e74c3c; font-size:12px; padding:5px 12px; margin-right:5px;">حذف</a>
+            </td>
+        </tr>`;
+    }).join('');
+    
     res.send(`
     <html dir="rtl"><head><meta charset="UTF-8"><title>Stats | AR.SA</title>${commonCSS}</head>
     <body>
