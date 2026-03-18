@@ -17,14 +17,22 @@ function getNextKey() {
 }
 
 /**
- * محرك ترجمة الكتل النصية الضخمة
+ * دالة لتنظيف أي زوائد يضيفها Gemini (مثل العلامات البرمجية)
  */
-async function translateBlock(blockText) {
+function cleanGeminiResponse(text) {
+    return text
+        .replace(/```srt/gi, '')
+        .replace(/```/g, '')
+        .replace(/Here is the translation:/gi, '')
+        .trim();
+}
+
+async function translateChunk(chunk) {
     const key = getNextKey();
     try {
         const genAI = new GoogleGenerativeAI(key);
         const model = genAI.getGenerativeModel({ 
-            model: "gemini-1.5-flash", // الفلاش ممتاز للكتل الطويلة
+            model: "gemini-1.5-flash",
             safetySettings: [
                 { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
                 { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
@@ -33,67 +41,58 @@ async function translateBlock(blockText) {
             ]
         });
 
-        const prompt = `You are a professional subtitle translator. Translate the following SRT block to Arabic. 
-        IMPORTANT: 
-        1. Keep the exact same SRT format (numbers and timestamps).
-        2. Do not change any timestamps.
-        3. Translate ONLY the text to natural Arabic.
+        // برومبت مباشر وصريح لا يقبل التأويل
+        const prompt = `Translate the following subtitle text to Arabic. 
+        Keep all timestamps (00:00...) and numbers exactly as they are. 
+        Return ONLY the translated SRT text:
         
-        SRT BLOCK:
-        ${blockText}`;
+        ${chunk}`;
 
         const result = await model.generateContent(prompt);
-        const translatedBlock = (await result.response).text().trim();
-        
-        // تنظيف الاستجابة من أي كلام إضافي قد يضعه Gemini (مثل ```srt)
-        return translatedBlock.replace(/```srt/g, '').replace(/```/g, '').trim();
+        const responseText = (await result.response).text();
+        const cleaned = cleanGeminiResponse(responseText);
+
+        return cleaned || chunk; // إذا كانت الاستجابة فارغة، يرجع الأصل ولا يتركها فارغة
     } catch (e) {
-        console.error("Block Translation Error:", e.message);
-        return blockText; // العودة للأصل عند الفشل لضمان عدم اختفاء النص
+        console.error("AI Error:", e.message);
+        return chunk;
     }
 }
 
-/**
- * تقسيم الفيلم لكتل ضخمة (كل كتلة 50 سطر SRT كامل بتوقيته)
- */
 async function translateToArabic(sourceSrt) {
     if (!sourceSrt || API_KEYS.length === 0) return sourceSrt;
 
-    const lines = sourceSrt.replace(/\r/g, '').split('\n');
-    let blocks = [];
-    let currentBlock = [];
-    let srtCounter = 0;
+    // تقسيم الملف إلى قطع كبيرة (كل قطعة حوالي 3000 حرف)
+    // هذا أفضل من تقسيم الأسطر لأنها تحافظ على "سياق" الفيلم
+    const maxChunkLength = 3000;
+    let chunks = [];
+    let currentChunk = "";
 
-    // تقسيم الملف إلى كتل (كل كتلة تحتوي على 50 حوار كامل)
-    for (let line of lines) {
-        currentBlock.push(line);
-        if (line.includes('-->')) srtCounter++;
-        
-        if (srtCounter >= 50) {
-            blocks.push(currentBlock.join('\n'));
-            currentBlock = [];
-            srtCounter = 0;
+    const srtLines = sourceSrt.replace(/\r/g, '').split('\n');
+
+    for (let line of srtLines) {
+        if ((currentChunk.length + line.length) > maxChunkLength && line.trim() === "") {
+            chunks.push(currentChunk);
+            currentChunk = "";
         }
+        currentChunk += line + "\n";
     }
-    if (currentBlock.length > 0) blocks.push(currentBlock.join('\n'));
+    if (currentChunk) chunks.push(currentChunk);
 
-    console.log(`[BLOCK SYSTEM] 📦 تقسيم الفيلم إلى ${blocks.length} كتلة ضخمة...`);
+    console.log(`[ROBUST MODE] 🛠️ معالجة ${chunks.length} جزء ضخم...`);
 
-    let translatedFullSrt = [];
-    
-    // ترجمة الكتل بالتسلسل من البداية للنهاية
-    for (let i = 0; i < blocks.length; i++) {
-        console.log(`[PROGRESS] Translating Block ${i+1}/${blocks.length}...`);
-        const translated = await translateBlock(blocks[i]);
-        translatedFullSrt.push(translated);
+    let finalSrt = "";
+    for (let i = 0; i < chunks.length; i++) {
+        console.log(`[PROGRESS] Translating chunk ${i + 1}/${chunks.length}...`);
+        const translated = await translateChunk(chunks[i]);
+        finalSrt += translated + "\n\n";
     }
 
-    return translatedFullSrt.join('\n\n');
+    // التأكد من أن الملف النهائي ليس فارغاً تماماً
+    return finalSrt.trim().length > 10 ? finalSrt : sourceSrt;
 }
 
-/**
- * دوال الجلب (SubDL)
- */
+// دالة fetchAllPossibleSubs المحدثة لضمان رجوع بيانات دائماً
 async function fetchAllPossibleSubs(fullId, videoFileName) {
     const SUBDL_API_KEY = process.env.SUBDL_API_KEY;
     const [imdbId, season, episode] = fullId.split(':');
@@ -115,10 +114,11 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
             const content = await downloadAndUnzip(s.url);
             if (content) {
                 const translated = await translateToArabic(content);
-                return [{ content: translated, releaseName: s.release_name, source: `AI Block Translation` }];
+                // إذا فشلت الترجمة لأي سبب، نرجع الأصل الإنجليزي ولا نتركها فارغة
+                return [{ content: translated, releaseName: s.release_name, source: `AI Arabic` }];
             }
         }
-    } catch (e) { console.error(e); }
+    } catch (e) { console.error("Fetcher Error:", e); }
     return [];
 }
 
