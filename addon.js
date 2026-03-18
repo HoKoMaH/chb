@@ -1,48 +1,48 @@
 const { addonBuilder } = require("stremio-addon-sdk");
 const engine = require("./engine");
 
-// 1. تعريف الـ Manifest
 const manifest = {
     id: "community.ar.sa.smart",
-    version: "7.9.0",
+    version: "8.0.0",
     name: "AR.SA Smart Subtitles",
-    description: "ترجمة عربية ذكية ومزامنة تلقائية لكافة المحتويات",
+    description: "ترجمة عربية ذكية ومزامنة تلقائية",
     resources: ["subtitles"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
     catalogs: []
 };
 
-// 2. بناء الإضافة
 const builder = new addonBuilder(manifest);
 
-// 3. تعريف الـ Handler الخاص بالترجمة
 builder.defineSubtitlesHandler(async (args) => {
     const { id, extra } = args;
     const videoFileName = extra.filename || ""; 
 
-    console.log(`[ADDON] 📥 طلب ترجمة لـ: ${id} | الملف: ${videoFileName}`);
+    console.log(`[STREMIO-REQUEST] 📥 طلب لـ: ${id} | ملف: ${videoFileName}`);
 
     try {
-        // استدعاء المحرك الذكي من engine.js
+        // جلب الترجمات من المحرك
         const subs = await engine.getSyncedSubtitles(id, videoFileName);
         
-        if (!subs || subs.length === 0) return { subtitles: [] };
+        if (!subs || subs.length === 0) {
+            console.log(`[STREMIO] ⚠️ لا توجد ترجمات متاحة حالياً لـ: ${id}`);
+            return { subtitles: [] };
+        }
 
-        // تحويل النتائج لتنسيق ستريميو
+        // تحويل النتائج لتنسيق Stremio الصحيح
         const formattedSubs = subs.map(sub => ({
             id: sub.fileId,
+            // التأكد من أن الرابط يشير لسيرفر Render الخاص بك وينتهي بـ .srt
             url: `https://chb-gy3n.onrender.com/sub/${sub.fileId}.srt`,
-            name: `${sub.isAI ? '🤖 ' : '🇸🇦 '}${sub.label}${sub.isMatch ? ' ⭐' : ''}`
+            name: `${sub.isAI ? '🤖 ' : '🇸🇦 '}${sub.label}`
         }));
 
+        console.log(`[STREMIO] ✅ تم إرسال ${formattedSubs.length} ترجمة بنجاح.`);
         return { subtitles: formattedSubs };
     } catch (e) {
-        console.error(`[ADDON-ERROR] ❌ فشل في جلب الترجمة: ${e.message}`);
+        console.error(`[STREMIO-ERROR] ❌ خطأ: ${e.message}`);
         return { subtitles: [] };
     }
 });
 
-// 4. التصدير (مهم جداً لحل خطأ Undefined config)
-const addonInterface = builder.getInterface();
-module.exports = addonInterface;
+module.exports = builder.getInterface();
