@@ -17,20 +17,17 @@ function getNextKey() {
 }
 
 /**
- * دالة تنظيف النص من أكواد SRT الخاصة مثل {\an8} لضمان عدم إرباك الذكاء الاصطناعي
+ * دالة ترجمة سطر واحد أو مجموعة صغيرة جداً لضمان الصفر أخطاء
  */
-function cleanSrtTags(text) {
-    return text.replace(/\{.*?\}/g, '').trim();
-}
+async function translateWithRetry(text) {
+    if (!text || text.trim() === "" || /^\d+$/.test(text) || text.includes('-->')) return text;
 
-async function translateBatch(batchTexts, batchIndices, translatedLines) {
-    let success = false;
     let attempts = 0;
+    // تنظيف النص من الأكواد التقنية لضمان قبول Gemini له
+    const cleanText = text.replace(/\{.*?\}/g, '').trim();
+    if (!cleanText) return text;
 
-    // تنظيف النصوص قبل إرسالها (نحتفظ بنسخة من الأكواد لإعادتها إذا لزم الأمر، أو نترجم النص النظيف فقط)
-    const cleanedTexts = batchTexts.map(t => cleanSrtTags(t));
-
-    while (!success && attempts < 2) {
+    while (attempts < 2) {
         const key = getNextKey();
         try {
             const genAI = new GoogleGenerativeAI(key);
@@ -44,81 +41,47 @@ async function translateBatch(batchTexts, batchIndices, translatedLines) {
                 ]
             });
 
-            // طلب ترجمة مبسط جداً مع علامة فصل فريدة (---) بدلاً من الترقيم
-            const prompt = `Translate these movie subtitle lines to Arabic. Keep the same order. Separated by '---'. No extra text:\n\n` + 
-                           cleanedTexts.join('\n---\n');
-
-            const result = await model.generateContent(prompt);
-            const text = (await result.response).text().trim();
-
-            if (text) {
-                // تقسيم الاستجابة بناءً على الفاصل
-                const parts = text.split('---').map(p => p.trim());
-                
-                for (let j = 0; j < batchIndices.length; j++) {
-                    // إذا نجحت الترجمة نضعها، وإذا كانت فارغة نضع النص الأصلي (لضمان عدم اختفاء السطر)
-                    if (parts[j] && parts[j].length > 0) {
-                        translatedLines[batchIndices[j]] = parts[j];
-                    } else {
-                        translatedLines[batchIndices[j]] = batchTexts[j]; 
-                    }
-                }
-                success = true;
-            }
+            const result = await model.generateContent(`Translate this movie line to Arabic, return ONLY the translation: "${cleanText}"`);
+            const translated = (await result.response).text().trim();
+            
+            if (translated && translated.length > 0) return translated;
         } catch (e) {
             attempts++;
-            await new Promise(r => setTimeout(r, 1500));
+            await new Promise(r => setTimeout(r, 500));
         }
     }
-
-    // تأمين أخير لضمان عدم وجود فراغ
-    batchIndices.forEach((globalIdx, localIdx) => {
-        if (!translatedLines[globalIdx] || translatedLines[globalIdx].trim() === "") {
-            translatedLines[globalIdx] = batchTexts[localIdx];
-        }
-    });
+    return text; // إذا فشل تماماً يعيد النص الأصلي
 }
 
 async function translateToArabic(sourceSrt, onProgress) {
     if (!sourceSrt || API_KEYS.length === 0) return sourceSrt;
 
     const lines = sourceSrt.replace(/\r/g, '').split('\n');
-    let translatedLines = [...lines]; 
+    let translatedLines = [];
 
-    let allBatches = [];
-    const BATCH_SIZE = 15; // تقليل الحجم لأقصى دقة ممكنة
-    const PARALLEL_LIMIT = 2;
+    console.log(`[ULTRA STABILITY] 🛡️ بدء الترجمة بنظام السطر الآمن...`);
 
-    let currentBatchTexts = [];
-    let currentBatchIndices = [];
-
+    // معالجة الأسطر واحداً تلو الآخر لضمان عدم حدوث أي إزاحة (Offset)
     for (let i = 0; i < lines.length; i++) {
-        let line = lines[i].trim();
+        let line = lines[i];
         
-        // فحص صارم جداً للسطر: هل هو حوار حقيقي؟
+        // فحص: هل السطر هو نص حوار؟
         const isTimestamp = line.includes('-->');
-        const isNumber = /^\d+$/.test(line);
-        const isEmpty = line === "";
+        const isNumber = /^\d+$/.test(line.trim());
+        const isEmpty = line.trim() === "";
 
         if (!isTimestamp && !isNumber && !isEmpty) {
-            currentBatchTexts.push(line);
-            currentBatchIndices.push(i);
+            // ترجمة الحوار فقط
+            const translated = await translateWithRetry(line);
+            translatedLines.push(translated);
+        } else {
+            // الاحتفاظ بالتوقيت والأرقام كما هي
+            translatedLines.push(line);
         }
 
-        if (currentBatchTexts.length === BATCH_SIZE || (i === lines.length - 1 && currentBatchTexts.length > 0)) {
-            allBatches.push({ texts: [...currentBatchTexts], indices: [...currentBatchIndices] });
-            currentBatchTexts = [];
-            currentBatchIndices = [];
+        if (onProgress && i % 50 === 0) {
+            onProgress(Math.floor((i / lines.length) * 100));
         }
-    }
-
-    console.log(`[STABILITY MODE] 🛠️ ترجمة ${allBatches.length} دفعة بنظام التحقق الثنائي...`);
-
-    for (let i = 0; i < allBatches.length; i += PARALLEL_LIMIT) {
-        const group = allBatches.slice(i, i + PARALLEL_LIMIT);
-        await Promise.all(group.map(batch => translateBatch(batch.texts, batch.indices, translatedLines)));
-        if (onProgress) onProgress(Math.floor((i / allBatches.length) * 100));
-        await new Promise(r => setTimeout(r, 1200));
     }
 
     return translatedLines.join('\n');
