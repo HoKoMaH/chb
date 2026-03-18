@@ -17,17 +17,14 @@ function getNextKey() {
 }
 
 /**
- * دالة لتنظيف أي زوائد يضيفها Gemini (مثل العلامات البرمجية)
+ * دالة ترجمة النص فقط مع الحفاظ على الكلمات التقنية
  */
-function cleanGeminiResponse(text) {
-    return text
-        .replace(/```srt/gi, '')
-        .replace(/```/g, '')
-        .replace(/Here is the translation:/gi, '')
-        .trim();
-}
+async function translateTextOnly(text) {
+    if (!text || text.trim() === "") return text;
+    
+    // إذا كان السطر يحتوي على توقيت أو أرقام فقط، نرجعه كما هو فوراً
+    if (text.includes('-->') || /^\d+$/.test(text.trim())) return text;
 
-async function translateChunk(chunk) {
     const key = getNextKey();
     try {
         const genAI = new GoogleGenerativeAI(key);
@@ -41,58 +38,52 @@ async function translateChunk(chunk) {
             ]
         });
 
-        // برومبت مباشر وصريح لا يقبل التأويل
-        const prompt = `Translate the following subtitle text to Arabic. 
-        Keep all timestamps (00:00...) and numbers exactly as they are. 
-        Return ONLY the translated SRT text:
+        // طلب ترجمة مباشر جداً للسطر
+        const result = await model.generateContent(`Translate this movie dialogue to Arabic, return ONLY the translation: ${text}`);
+        const responseText = (await result.response).text().trim();
         
-        ${chunk}`;
-
-        const result = await model.generateContent(prompt);
-        const responseText = (await result.response).text();
-        const cleaned = cleanGeminiResponse(responseText);
-
-        return cleaned || chunk; // إذا كانت الاستجابة فارغة، يرجع الأصل ولا يتركها فارغة
+        return responseText || text;
     } catch (e) {
-        console.error("AI Error:", e.message);
-        return chunk;
+        return text; // في حال الخطأ نرجع النص الأصلي لضمان عدم ضياع السطر
     }
 }
 
 async function translateToArabic(sourceSrt) {
-    if (!sourceSrt || API_KEYS.length === 0) return sourceSrt;
+    if (!sourceSrt) return "";
 
-    // تقسيم الملف إلى قطع كبيرة (كل قطعة حوالي 3000 حرف)
-    // هذا أفضل من تقسيم الأسطر لأنها تحافظ على "سياق" الفيلم
-    const maxChunkLength = 3000;
-    let chunks = [];
-    let currentChunk = "";
+    // تقسيم الملف إلى أسطر حقيقية وتنظيفها من الفراغات الزائدة في الأطراف
+    const lines = sourceSrt.replace(/\r/g, '').split('\n');
+    let finalTranslatedSrt = [];
 
-    const srtLines = sourceSrt.replace(/\r/g, '').split('\n');
+    console.log(`[LINE-BY-LINE] 🛡️ معالجة ${lines.length} سطر بالترتيب...`);
 
-    for (let line of srtLines) {
-        if ((currentChunk.length + line.length) > maxChunkLength && line.trim() === "") {
-            chunks.push(currentChunk);
-            currentChunk = "";
+    for (let i = 0; i < lines.length; i++) {
+        let line = lines[i];
+
+        // 1. إذا كان السطر عبارة عن رقم تسلسلي أو توقيت (00:00...) نضعه كما هو
+        if (/^\d+$/.test(line.trim()) || line.includes('-->')) {
+            finalTranslatedSrt.push(line);
+        } 
+        // 2. إذا كان السطر فارغاً نضعه كما هو
+        else if (line.trim() === "") {
+            finalTranslatedSrt.push("");
         }
-        currentChunk += line + "\n";
-    }
-    if (currentChunk) chunks.push(currentChunk);
-
-    console.log(`[ROBUST MODE] 🛠️ معالجة ${chunks.length} جزء ضخم...`);
-
-    let finalSrt = "";
-    for (let i = 0; i < chunks.length; i++) {
-        console.log(`[PROGRESS] Translating chunk ${i + 1}/${chunks.length}...`);
-        const translated = await translateChunk(chunks[i]);
-        finalSrt += translated + "\n\n";
+        // 3. إذا كان نص حوار، نقوم بترجمته
+        else {
+            const translated = await translateTextOnly(line);
+            finalTranslatedSrt.push(translated);
+            
+            // تسجيل التقدم كل 50 سطر للتأكد أن السيرفر يعمل
+            if (i % 50 === 0) console.log(`[LIVE] Translated line ${i} of ${lines.length}`);
+        }
     }
 
-    // التأكد من أن الملف النهائي ليس فارغاً تماماً
-    return finalSrt.trim().length > 10 ? finalSrt : sourceSrt;
+    // تجميع الملف النهائي والتأكد من عدم وجود فراغات قاتلة
+    const result = finalTranslatedSrt.join('\n');
+    return result.length > 10 ? result : sourceSrt;
 }
 
-// دالة fetchAllPossibleSubs المحدثة لضمان رجوع بيانات دائماً
+// دالة fetchAllPossibleSubs و downloadAndUnzip تبقى ثابتة
 async function fetchAllPossibleSubs(fullId, videoFileName) {
     const SUBDL_API_KEY = process.env.SUBDL_API_KEY;
     const [imdbId, season, episode] = fullId.split(':');
@@ -114,11 +105,10 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
             const content = await downloadAndUnzip(s.url);
             if (content) {
                 const translated = await translateToArabic(content);
-                // إذا فشلت الترجمة لأي سبب، نرجع الأصل الإنجليزي ولا نتركها فارغة
                 return [{ content: translated, releaseName: s.release_name, source: `AI Arabic` }];
             }
         }
-    } catch (e) { console.error("Fetcher Error:", e); }
+    } catch (e) { console.error(e); }
     return [];
 }
 
