@@ -2,7 +2,7 @@ const axios = require('axios');
 const AdmZip = require('adm-zip');
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require("@google/generative-ai");
 
-// 1. إعداد وتدوير المفاتيح
+// 1. تنظيف المفاتيح
 const API_KEYS = [
     process.env.GEMINI_KEY_1, process.env.GEMINI_KEY_2, process.env.GEMINI_KEY_3,
     process.env.GEMINI_KEY_4, process.env.GEMINI_KEY_5, process.env.GEMINI_KEY_6,
@@ -18,7 +18,7 @@ function getNextKey() {
 }
 
 /**
- * محرك الترجمة - يدعم التحويل من أي لغة للعربية
+ * دالة ترجمة الدفعة مع ضمان عدم إرجاع قيم فارغة
  */
 async function translateBatch(batchTexts, batchIndices, translatedLines) {
     let success = false;
@@ -38,44 +38,56 @@ async function translateBatch(batchTexts, batchIndices, translatedLines) {
                 ]
             });
 
-            // تحديث الـ Prompt ليقبل أي لغة مدخلة
-            const prompt = `Translate the following subtitle lines from their original language into natural, cinematic Arabic. Return ONLY the translated lines, one per line, keeping the exact same order:\n\n${batchTexts.join('\n')}`;
-            
+            const prompt = `Translate to Arabic. Return ONLY translated lines. Keep order:\n\n${batchTexts.join('\n')}`;
             const result = await model.generateContent(prompt);
-            const text = (await result.response).text().trim();
+            const response = await result.response;
+            const text = response.text().trim();
 
             if (text) {
-                const parts = text.split('\n');
+                const parts = text.split('\n').map(p => p.trim()).filter(p => p !== "");
+                // التأكد من مطابقة عدد الأسطر المترجمة مع المطلوبة
                 for (let j = 0; j < batchIndices.length; j++) {
-                    translatedLines[batchIndices[j]] = parts[j]?.trim() || batchTexts[j];
+                    // إذا أرجع Gemini أسطر أقل من المطلوب، نستخدم النص الأصلي للبقية
+                    translatedLines[batchIndices[j]] = parts[j] || batchTexts[j];
                 }
                 success = true;
             }
         } catch (e) {
             attempts++;
-            await new Promise(r => setTimeout(r, 500));
+            console.error(`[Batch Error] Attempt ${attempts} failed: ${e.message.substring(0, 50)}`);
+            await new Promise(r => setTimeout(r, 1000));
+        }
+    }
+    
+    // إذا فشلت المحاولات تماماً، نضمن عدم ترك السطر فارغاً
+    if (!success) {
+        for (let j = 0; j < batchIndices.length; j++) {
+            if (!translatedLines[batchIndices[j]]) {
+                translatedLines[batchIndices[j]] = batchTexts[j];
+            }
         }
     }
 }
 
 /**
- * المحرك النفاث للتعريب المتوازي
+ * المحرك الرئيسي
  */
 async function translateToArabic(sourceSrt, onProgress) {
     if (!sourceSrt || API_KEYS.length === 0) return sourceSrt;
 
     const lines = sourceSrt.replace(/\r/g, '').split('\n');
-    let translatedLines = [...lines];
+    let translatedLines = [...lines]; // نسخ الملف بالكامل كبداية
     let allBatches = [];
     
-    const BATCH_SIZE = 50; 
-    const PARALLEL_LIMIT = 5; 
+    const BATCH_SIZE = 40; 
+    const PARALLEL_LIMIT = 3; // خفضنا التوازي قليلاً لضمان عدم ضياع الأسطر
 
     let currentBatchTexts = [];
     let currentBatchIndices = [];
 
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i].trim();
+        // نحدد فقط أسطر الحوار المباشر
         if (line && !line.includes('-->') && isNaN(line)) {
             currentBatchTexts.push(line);
             currentBatchIndices.push(i);
@@ -88,13 +100,12 @@ async function translateToArabic(sourceSrt, onProgress) {
         }
     }
 
-    console.log(`[ULTRA SPEED] 🌍 تعريب شامل من أي لغة.. معالجة ${allBatches.length} دفعة...`);
-
     for (let i = 0; i < allBatches.length; i += PARALLEL_LIMIT) {
         const group = allBatches.slice(i, i + PARALLEL_LIMIT);
         await Promise.all(group.map(batch => translateBatch(batch.texts, batch.indices, translatedLines)));
+        
         if (onProgress) onProgress(Math.floor((i / allBatches.length) * 100));
-        await new Promise(r => setTimeout(r, 300));
+        await new Promise(r => setTimeout(r, 500));
     }
 
     if (onProgress) onProgress(100);
@@ -102,7 +113,7 @@ async function translateToArabic(sourceSrt, onProgress) {
 }
 
 /**
- * جلب الترجمات - الآن يبحث عن أي لغة متوفرة إذا لم يجد العربية
+ * جلب الترجمات من SubDL
  */
 async function fetchAllPossibleSubs(fullId, videoFileName) {
     const SUBDL_API_KEY = process.env.SUBDL_API_KEY;
@@ -112,8 +123,6 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
         let baseUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${SUBDL_API_KEY}`;
         if (season && episode) baseUrl += `&season=${season}&episode=${episode}`;
 
-        // 1. محاولة جلب العربية الجاهزة (الأولوية دائماً للعربية لتوفير الوقت)
-        console.log(`[SCRAPER] 🔍 البحث عن ترجمة عربية جاهزة...`);
         const arRes = await axios.get(`${baseUrl}&languages=ar`).catch(() => null);
         if (arRes?.data?.subtitles?.length > 0) {
             const s = arRes.data.subtitles[0];
@@ -121,21 +130,16 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
             if (content) return [{ content, releaseName: s.release_name, source: "Original" }];
         }
 
-        // 2. إذا لم يجد، يجلب أي لغة أخرى متوفرة (الإنجليزية، الفرنسية، إلخ) لتعريبها
-        console.log(`[SCRAPER] 🌍 لم يتم العثور على عربية، جاري البحث عن بدائل لتعريبها...`);
         const allRes = await axios.get(baseUrl).catch(() => null);
-        
         if (allRes?.data?.subtitles?.length > 0) {
-            // نختار أول ترجمة متوفرة (غالباً ما تكون إنجليزية أو لغة الفيلم الأصلية)
             const s = allRes.data.subtitles[0]; 
             const content = await downloadAndUnzip(s.url);
             if (content) {
-                console.log(`[AI] 🤖 بدء تعريب النسخة المتاحة: (${s.release_name})`);
                 const translated = await translateToArabic(content, null);
-                if (translated) return [{ content: translated, releaseName: s.release_name, source: `AI (Translated from Original)` }];
+                if (translated) return [{ content: translated, releaseName: s.release_name, source: `AI Translated` }];
             }
         }
-    } catch (e) { console.error(`[ERROR] fetchAllPossibleSubs: ${e.message}`); }
+    } catch (e) { console.error(e); }
     return [];
 }
 
