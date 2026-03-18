@@ -4,8 +4,8 @@ const { getSmartSubtitles } = require("./scraper");
 
 const manifest = {
     id: "community.ar_sa.ai",
-    version: "1.6.0",
-    name: "AR.SA AI Subtitles",
+    version: "2.0.0",
+    name: "AI Subtitles By HoKoMaH",
     description: "ترجمات عربية حصرية بالذكاء الاصطناعي 🇸🇦",
     logo: "https://i.imgur.com/huxCzjK.png",
     background: "https://i.imgur.com/Is1Dciv.png", // اختياري
