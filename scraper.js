@@ -3,37 +3,42 @@ const AdmZip = require('adm-zip');
 const { translate } = require('@vitalets/google-translate-api');
 
 /**
- * 1. محرك التعريب الذكي - يدعم (فارسي، إنجليزي، صيني) إلى العربية
- * تم إضافة پارامتر onProgress لإرسال النسبة المئوية للواجهة الأمامية
+ * 1. محرك التعريب الذكي - إصدار "الحماية القصوى"
+ * تم تحسينه للتعامل مع الملفات الضخمة وتجنب حظر الـ IP
  */
 async function translateToArabic(sourceSrt, onProgress) {
     if (!sourceSrt) return null;
     
-    // تنظيف النص من أي رموز غريبة قد تسبب فشل المكتبة
+    // تنظيف النص وتجهيز الأسطر
     const lines = sourceSrt.replace(/\r/g, '').split('\n');
     let translatedLines = [...lines]; 
     let batchTexts = [];
     let batchIndices = [];
     
-    console.log(`[TRANSLATOR] 🚀 بدء تعريب ملف (${lines.length} سطر)...`);
+    // إعدادات الحماية (تغيير هذه القيم يؤثر على سرعة الحظر)
+    const BATCH_SIZE = 15; // عدد الأسطر في كل طلب (توازن بين السرعة والأمان)
+    const SUCCESS_COOLDOWN = 3000; // انتظار 3 ثوانٍ بعد كل عملية ناجحة
+    const MAX_RETRIES = 5; // عدد محاولات إعادة الاتصال عند الفشل
+
+    console.log(`[TRANSLATOR] 🚀 بدء تعريب ملف ضخم (${lines.length} سطر)...`);
 
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i].trim();
         
-        // تصفية: نأخذ فقط نصوص الحوار (نتجاهل التوقيت والأرقام)
+        // تصفية: نأخذ نصوص الحوار فقط
         if (line && !line.includes('-->') && isNaN(line)) {
             batchTexts.push(line);
             batchIndices.push(i);
         }
 
-        // استخدام دفعات صغيرة جداً (3-5 أسطر) لضمان عدم الحظر ودقة الفارسية
-        if (batchTexts.length === 3 || (i === lines.length - 1 && batchTexts.length > 0)) {
+        // تنفيذ الترجمة عند اكتمال الدفعة أو نهاية الملف
+        if (batchTexts.length === BATCH_SIZE || (i === lines.length - 1 && batchTexts.length > 0)) {
             let success = false;
-            let retries = 3;
+            let retries = MAX_RETRIES;
 
             while (!success && retries > 0) {
                 try {
-                    // نستخدم translate من المكتبة مع إجبار اللغة العربية
+                    // إرسال الدفعة للترجمة
                     const res = await translate(batchTexts.join('\n'), { 
                         to: 'ar',
                         forceTo: true 
@@ -42,41 +47,41 @@ async function translateToArabic(sourceSrt, onProgress) {
                     if (res && res.text) {
                         const translatedParts = res.text.split('\n');
                         for (let j = 0; j < batchIndices.length; j++) {
-                            // وضع النص المترجم في مكانه الصحيح
+                            // دمج النص المترجم في مصفوفة الأسطر الأصلية
                             translatedLines[batchIndices[j]] = translatedParts[j]?.trim() || batchTexts[j];
                         }
                         success = true;
                     }
                 } catch (e) {
                     retries--;
-                    // انتظار تصاعدي: كلما فشل زاد وقت الانتظار (5ث، 10ث، 15ث)
-                    const waitTime = (4 - retries) * 5000; 
-                    console.log(`[WAIT] ⚠️ ضغط أو لغة غير مفهومة.. محاولة ${3-retries}/3.. انتظار ${waitTime/1000}ث`);
+                    // انتظار تصاعدي طويل جداً عند حدوث خطأ (10ث، 20ث، 30ث...)
+                    const waitTime = (MAX_RETRIES + 1 - retries) * 10000; 
+                    console.log(`[⚠️ RETRY] ضغط عالي من جوجل.. محاولة ${MAX_RETRIES - retries}/${MAX_RETRIES}.. انتظار ${waitTime/1000} ثانية`);
                     await new Promise(r => setTimeout(r, waitTime)); 
                 }
             }
             
+            // تصفير الدفعة للبدء بالتي تليها
             batchTexts = [];
             batchIndices = [];
 
-            // إرسال النسبة المئوية لـ index.js إذا تم توفير الـ Callback
+            // إرسال التحديث لواجهة المستخدم (شريط التقدم)
             if (onProgress) {
-                let progressValue = Math.floor((i / lines.length) * 100);
-                onProgress(progressValue);
+                let percent = Math.floor((i / lines.length) * 100);
+                onProgress(percent);
             }
 
-            // لوقات التقدم في الكونسول كل 200 سطر
+            // لوق داخلي كل 200 سطر لمدير السيرفر
             if (i % 200 === 0) {
-                let progress = ((i / lines.length) * 100).toFixed(1);
-                console.log(`[PROGRESS] ⏳ تم معالجة ${progress}% (${i}/${lines.length} سطر)...`);
+                console.log(`[PROGRESS] ⏳ تم إنجاز ${((i / lines.length) * 100).toFixed(1)}%`);
             }
             
-            // Cooldown إلزامي بين الطلبات لمنع الـ IP Block
-            await new Promise(r => setTimeout(r, 1000)); 
+            // راحة إجبارية للسيرفر لمنع كشف الـ Bot
+            await new Promise(r => setTimeout(r, SUCCESS_COOLDOWN)); 
         }
     }
     
-    console.log(`[TRANSLATOR] ✅ اكتمل تعريب الملف بنجاح.`);
+    console.log(`[TRANSLATOR] ✅ اكتمل التعريب الشامل بنجاح.`);
     return translatedLines.join('\n');
 }
 
@@ -93,8 +98,8 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
         let baseUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${API_KEY}`;
         if (season && episode) baseUrl += `&season=${season}&episode=${episode}`;
 
-        // جلب العربي الأصلي أولاً
-        console.log(`[SCRAPER] 🔍 البحث عن ترجمة عربية أصلية لـ ${fullId}...`);
+        // محاولة جلب ترجمة عربية جاهزة أولاً لتوفير الموارد
+        console.log(`[SCRAPER] 🔍 يبحث عن ترجمة عربية جاهزة...`);
         const arRes = await axios.get(`${baseUrl}&languages=ar`).catch(() => null);
         
         if (arRes?.data?.subtitles?.length > 0) {
@@ -105,10 +110,10 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
             if (results.length > 0) return results;
         }
 
-        // إذا لم يوجد عربي، نجلب الأجنبي (فارسي/إنجليزي) ونبدأ التعريب الآلي
+        // إذا لم توجد ترجمة عربية، نجلب الأجنبية (إنجليزية/فارسية) ونعربها آلياً
         const allRes = await axios.get(baseUrl).catch(() => null);
         if (allRes?.data?.subtitles?.length > 0) {
-            // ترتيب النتائج حسب مطابقة الجودة (Technical Tags)
+            // ترتيب حسب مطابقة جودة الفيديو
             const sortedSubs = allRes.data.subtitles.sort((a, b) => {
                 const scoreA = technicalTags.filter(tag => a.release_name.toUpperCase().includes(tag)).length;
                 const scoreB = technicalTags.filter(tag => b.release_name.toUpperCase().includes(tag)).length;
@@ -119,7 +124,7 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
             const sourceContent = await downloadAndUnzip(bestSub.url);
             
             if (sourceContent) {
-                // نمرر null للنسبة المئوية هنا لأنها ترجمة خلفية تلقائية
+                // نمرر null لأنها عملية خلفية تلقائية لا تحتاج شريط تقدم حي
                 const translated = await translateToArabic(sourceContent, null);
                 if (translated) {
                     results.push({ content: translated, releaseName: bestSub.release_name, source: "AI" });
