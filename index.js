@@ -9,22 +9,13 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
 
-/**
- * 1. إعدادات استقبال البيانات
- */
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
-/**
- * 2. الاتصال بقاعدة البيانات
- */
 mongoose.connect(process.env.MONGO_URI)
     .then(() => console.log("✅ [DATABASE] Connected"))
     .catch(err => console.error("❌ [DATABASE] Error:", err));
 
-/**
- * 3. تعريف الموديل
- */
 const SubtitleSchema = new mongoose.Schema({
     fileId: { type: String, unique: true },
     imdbId: String,
@@ -35,9 +26,7 @@ const SubtitleSchema = new mongoose.Schema({
 });
 const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
 
-/**
- * 4. محرك بحث IMDb ID
- */
+// محرك بحث IMDb
 app.get("/search-id", async (req, res) => {
     const query = req.query.q;
     if (!query) return res.json([]);
@@ -47,15 +36,12 @@ app.get("/search-id", async (req, res) => {
     } catch (e) { res.status(500).json([]); }
 });
 
-/**
- * 5. مسار تعديل المزامنة
- */
+// مسار تعديل المزامنة
 app.post("/adjust-sync", async (req, res) => {
     try {
         const { text, offset } = req.body;
         const seconds = parseFloat(offset);
         if (isNaN(seconds)) return res.send(text);
-
         const adjustTime = (timeStr) => {
             let [hms, ms] = timeStr.split(',');
             let [h, m, s] = hms.split(':').map(parseFloat);
@@ -68,7 +54,6 @@ app.post("/adjust-sync", async (req, res) => {
             let nms = totalMs % 1000;
             return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}:${String(ns).padStart(2, '0')},${String(nms).padStart(3, '0')}`;
         };
-
         const lines = text.split('\n');
         const updatedLines = lines.map(line => {
             if (line.includes(' --> ')) {
@@ -81,9 +66,7 @@ app.post("/adjust-sync", async (req, res) => {
     } catch (e) { res.status(500).send(req.body.text); }
 });
 
-/**
- * 6. واجهة التعديل
- */
+// واجهة التعديل
 app.get("/edit/:fileId", async (req, res) => {
     const sub = await Subtitle.findOne({ fileId: req.params.fileId });
     if (!sub) return res.send("الملف غير موجود");
@@ -123,9 +106,7 @@ app.get("/edit/:fileId", async (req, res) => {
     </body></html>`);
 });
 
-/**
- * 7. واجهة الإحصائيات
- */
+// واجهة الإحصائيات مع ميزة النسخ والتعرف على النتائج
 app.get("/stats", async (req, res) => {
     try {
         const totalSubs = await Subtitle.countDocuments();
@@ -151,6 +132,9 @@ app.get("/stats", async (req, res) => {
             input, select, button { width: 100%; padding: 10px; margin: 5px 0; border-radius: 8px; border: 1px solid #ddd; box-sizing: border-box; }
             .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
             .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+            .search-item { padding: 8px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: 0.2s; }
+            .search-item:hover { background: #f8f9fa; }
+            code { background: #eee; padding: 2px 6px; border-radius: 4px; color: #d63031; font-weight: bold; }
         </style></head>
         <body>
             <div style="max-width: 900px; margin: auto; text-align:center;">
@@ -166,8 +150,8 @@ app.get("/stats", async (req, res) => {
                 <div class="grid-2">
                     <div class="card">
                         <h3>🔍 بحث IMDb ID</h3>
-                        <input id="q" placeholder="اسم الفيلم..."><button onclick="search()" style="background:#f1c40f; cursor:pointer;">بحث</button>
-                        <div id="r" style="text-align:right; font-size:12px; margin-top:10px;"></div>
+                        <input id="q" placeholder="اسم الفيلم..." onkeyup="if(event.keyCode===13) search()"><button onclick="search()" style="background:#f1c40f;">بحث</button>
+                        <div id="r" style="text-align:right; font-size:12px; margin-top:10px; border:1px solid #eee; border-radius:8px; max-height:200px; overflow:auto;"></div>
                     </div>
                     <div class="card">
                         <h3>📤 رفع يدوي ذكي</h3>
@@ -176,12 +160,12 @@ app.get("/stats", async (req, res) => {
                                 <option value="movie">🎬 فيلم</option>
                                 <option value="series">📺 مسلسل</option>
                             </select>
-                            <input name="imdbId" placeholder="IMDb ID (tt...)" required>
+                            <input name="imdbId" id="manual_id" placeholder="IMDb ID (tt...)" required>
                             <div id="sFields" style="display:none; gap:5px;">
                                 <input type="number" name="season" placeholder="موسم" style="width:50%">
                                 <input type="number" name="episode" placeholder="حلقة" style="width:50%">
                             </div>
-                            <input name="label" placeholder="اسم النسخة" required>
+                            <input name="label" id="manual_label" placeholder="اسم النسخة" required>
                             <input type="file" name="subtitleFile" accept=".srt" required>
                             <button type="submit" style="background:#27ae60; color:white; font-weight:bold; cursor:pointer;">رفع واعتماد</button>
                         </form>
@@ -195,19 +179,55 @@ app.get("/stats", async (req, res) => {
             </div>
             <script>
                 function toggleFields(){ document.getElementById('sFields').style.display = document.getElementById('type').value==='series'?'flex':'none'; }
+                
                 async function search(){
-                    const res = await fetch('/search-id?q=' + document.getElementById('q').value);
+                    const query = document.getElementById('q').value;
+                    if(!query) return;
+                    document.getElementById('r').innerHTML = '⏳ جاري البحث...';
+                    const res = await fetch('/search-id?q=' + query);
                     const data = await res.json();
-                    document.getElementById('r').innerHTML = data.slice(0,5).map(i => '<li>'+i.l+': <code>'+i.id+'</code></li>').join('');
+                    
+                    if(data.length === 0) {
+                        document.getElementById('r').innerHTML = '❌ لم يتم العثور على نتائج';
+                        return;
+                    }
+
+                    document.getElementById('r').innerHTML = data.slice(0,8).map(i => {
+                        const title = i.l;
+                        const year = i.y ? '('+i.y+')' : '';
+                        const id = i.id;
+                        const isSeries = i.q === 'TV series';
+                        return \`
+                            <div class="search-item" onclick="copyToUpload('\${id}', '\${title}', \${isSeries})">
+                                <b>\${title} \${year}</b> - <code>\${id}</code> 
+                                <span style="font-size:10px; color:#666;">(\${i.q || 'Content'})</span>
+                            </div>
+                        \`;
+                    }).join('');
+                }
+
+                function copyToUpload(id, title, isSeries) {
+                    // نسخ الـ ID للخانة
+                    document.getElementById('manual_id').value = id;
+                    // نسخ الاسم لخانة الرفع (اختياري لتسهيل العمل)
+                    document.getElementById('manual_label').value = title + ' - ';
+                    
+                    // تغيير النوع تلقائياً
+                    const typeSelect = document.getElementById('type');
+                    typeSelect.value = isSeries ? 'series' : 'movie';
+                    toggleFields();
+
+                    // نسخ للـ Clipboard
+                    navigator.clipboard.writeText(id);
+                    
+                    alert('✅ تم نسخ الـ ID: ' + id + '\\nوتم تعبئة بيانات الرفع تلقائياً!');
                 }
             </script>
         </body></html>`);
     } catch (e) { res.status(500).send("Error"); }
 });
 
-/**
- * 8. المسارات الخلفية
- */
+// المسارات الخلفية (Upload, Instant, Save, Delete, Sub) كما هي...
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     try {
         let { imdbId, type, season, episode, label } = req.body;
