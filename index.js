@@ -271,7 +271,7 @@ app.get("/stats", async (req, res) => {
         </style></head>
         <body>
             <div style="max-width: 900px; margin: auto; text-align:center;">
-                <h1>📊 إدارة ترجمات AR.SA</h1>
+                <h1>📊 إدارة ترجمات Stremio 📊</h1>
                 <a href="${installUrl}" style="background:#8e44ad; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold; display:inline-block; margin-bottom:20px;">+ تثبيت الإضافة في Stremio</a>
                 
                 <div class="stats-grid">
