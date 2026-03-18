@@ -17,84 +17,88 @@ function getNextKey() {
 }
 
 /**
- * دالة ترجمة سطر واحد أو مجموعة صغيرة جداً لضمان الصفر أخطاء
+ * محرك الترجمة الفردية: يضمن معالجة النص بدوره الصحيح
  */
-async function translateWithRetry(text) {
-    if (!text || text.trim() === "" || /^\d+$/.test(text) || text.includes('-->')) return text;
+async function translateLineByLine(text) {
+    // تجاهل الأسطر الفارغة أو أرقام التسلسل أو التوقيت
+    if (!text || text.trim() === "" || /^\d+$/.test(text.trim()) || text.includes('-->')) {
+        return text;
+    }
 
-    let attempts = 0;
-    // تنظيف النص من الأكواد التقنية لضمان قبول Gemini له
+    // تنظيف الأكواد التقنية مثل {\an8} لعدم إرباك الذكاء الاصطناعي
     const cleanText = text.replace(/\{.*?\}/g, '').trim();
     if (!cleanText) return text;
 
-    while (attempts < 2) {
-        const key = getNextKey();
-        try {
-            const genAI = new GoogleGenerativeAI(key);
-            const model = genAI.getGenerativeModel({ 
-                model: "gemini-1.5-flash",
-                safetySettings: [
-                    { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                    { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-                    { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                    { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                ]
-            });
+    const key = getNextKey();
+    try {
+        const genAI = new GoogleGenerativeAI(key);
+        const model = genAI.getGenerativeModel({ 
+            model: "gemini-1.5-flash",
+            safetySettings: [
+                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+            ]
+        });
 
-            const result = await model.generateContent(`Translate this movie line to Arabic, return ONLY the translation: "${cleanText}"`);
-            const translated = (await result.response).text().trim();
-            
-            if (translated && translated.length > 0) return translated;
-        } catch (e) {
-            attempts++;
-            await new Promise(r => setTimeout(r, 500));
-        }
+        const result = await model.generateContent(cleanText);
+        const translated = (await result.response).text().trim();
+        
+        // إذا نجحت الترجمة نرجعها، وإلا نرجع النص الأصلي فوراً لضمان عدم التوقف
+        return translated || text;
+    } catch (e) {
+        console.error(`[AI Error] Skipping line: ${e.message.substring(0, 30)}`);
+        return text; 
     }
-    return text; // إذا فشل تماماً يعيد النص الأصلي
 }
 
-async function translateToArabic(sourceSrt, onProgress) {
+/**
+ * المعالج المتسلسل: يبدأ من السطر 1 إلى نهاية الملف بالترتيب
+ */
+async function translateToArabic(sourceSrt) {
     if (!sourceSrt || API_KEYS.length === 0) return sourceSrt;
 
+    // تقسيم الملف لأسطر
     const lines = sourceSrt.replace(/\r/g, '').split('\n');
     let translatedLines = [];
 
-    console.log(`[ULTRA STABILITY] 🛡️ بدء الترجمة بنظام السطر الآمن...`);
+    console.log(`[SEQUENTIAL MODE] 🎞️ بدء المعالجة من السطر الأول...`);
 
-    // معالجة الأسطر واحداً تلو الآخر لضمان عدم حدوث أي إزاحة (Offset)
     for (let i = 0; i < lines.length; i++) {
-        let line = lines[i];
-        
-        // فحص: هل السطر هو نص حوار؟
-        const isTimestamp = line.includes('-->');
-        const isNumber = /^\d+$/.test(line.trim());
-        const isEmpty = line.trim() === "";
+        const currentLine = lines[i];
 
-        if (!isTimestamp && !isNumber && !isEmpty) {
-            // ترجمة الحوار فقط
-            const translated = await translateWithRetry(line);
-            translatedLines.push(translated);
+        // هل السطر يحتاج ترجمة؟ (ليس توقيت وليس رقماً)
+        if (currentLine.includes('-->') || /^\d+$/.test(currentLine.trim()) || currentLine.trim() === "") {
+            translatedLines.push(currentLine);
         } else {
-            // الاحتفاظ بالتوقيت والأرقام كما هي
-            translatedLines.push(line);
-        }
-
-        if (onProgress && i % 50 === 0) {
-            onProgress(Math.floor((i / lines.length) * 100));
+            // الترجمة "بالدور" - السطر الحالي ينتظر استجابة الـ API قبل الانتقال للي بعده
+            const translated = await translateLineByLine(currentLine);
+            translatedLines.push(translated);
+            
+            // تحديث السجلات كل 10 أسطر لمتابعة التقدم بالترتيب
+            if (i % 10 === 0) {
+                console.log(`[LIVE] Processing line ${i}/${lines.length}...`);
+            }
         }
     }
 
+    console.log(`[DONE] ✅ اكتملت الترجمة التسلسلية.`);
     return translatedLines.join('\n');
 }
 
-// الدوال fetchAllPossibleSubs و downloadAndUnzip تبقى كما هي
+/**
+ * دالة الجلب والتشغيل
+ */
 async function fetchAllPossibleSubs(fullId, videoFileName) {
     const SUBDL_API_KEY = process.env.SUBDL_API_KEY;
     const [imdbId, season, episode] = fullId.split(':');
+    
     try {
         let baseUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${SUBDL_API_KEY}`;
         if (season && episode) baseUrl += `&season=${season}&episode=${episode}`;
 
+        // البحث عن نسخة عربية جاهزة أولاً
         const arRes = await axios.get(`${baseUrl}&languages=ar`).catch(() => null);
         if (arRes?.data?.subtitles?.length > 0) {
             const s = arRes.data.subtitles[0];
@@ -102,16 +106,20 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
             if (content) return [{ content, releaseName: s.release_name, source: "Original" }];
         }
 
+        // إذا لم تتوفر، نبدأ بالترجمة التسلسلية الفورية
         const allRes = await axios.get(baseUrl).catch(() => null);
         if (allRes?.data?.subtitles?.length > 0) {
             const s = allRes.data.subtitles[0]; 
             const content = await downloadAndUnzip(s.url);
             if (content) {
-                const translated = await translateToArabic(content, null);
-                return [{ content: translated, releaseName: s.release_name, source: `AI Translated` }];
+                // استدعاء محرك الترجمة المتسلسل
+                const translated = await translateToArabic(content);
+                return [{ content: translated, releaseName: s.release_name, source: `AI Sequential Translation` }];
             }
         }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+        console.error(`[CRITICAL ERROR]: ${e.message}`);
+    }
     return [];
 }
 
