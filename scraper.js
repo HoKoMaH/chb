@@ -2,13 +2,16 @@ const axios = require('axios');
 const AdmZip = require('adm-zip');
 const { translate } = require('@vitalets/google-translate-api');
 
+/**
+ * 1. دالة التعريب الذكية (تجاوز الحظر + نظام التبريد)
+ */
 async function translateToArabic(sourceSrt) {
     if (!sourceSrt) return null;
     const lines = sourceSrt.split('\n');
     let batchTexts = [], batchIndices = [];
     const totalLines = lines.length;
 
-    console.log(`[TRANSLATOR] 🤖 معالجة ${totalLines} سطر بنظام التبريد...`);
+    console.log(`[TRANSLATOR] 🤖 بدء تعريب ملف ضخم (${totalLines} سطر).. جاري العمل بهدوء.`);
 
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i].trim();
@@ -17,6 +20,7 @@ async function translateToArabic(sourceSrt) {
             batchIndices.push(i);
         }
 
+        // معالجة دفعات صغيرة (10 أسطر) لضمان عدم الحظر
         if (batchTexts.length === 10 || (i === lines.length - 1 && batchTexts.length > 0)) {
             let success = false, retries = 5;
             while (!success && retries > 0) {
@@ -31,61 +35,103 @@ async function translateToArabic(sourceSrt) {
                     }
                 } catch (e) {
                     retries--;
-                    console.log(`[WAIT] ⚠️ ضغط عند السطر ${i}.. انتظار 5 ثوانٍ...`);
+                    console.log(`[WAIT] ⚠️ ضغط مؤقت.. انتظار 5 ثوانٍ (المحاولات: ${retries})`);
                     await new Promise(r => setTimeout(r, 5000));
                 }
             }
             if (i % 100 === 0) console.log(`[PROGRESS] ⏳ ${((i/totalLines)*100).toFixed(1)}%`);
-            await new Promise(r => setTimeout(r, 500)); // تأخير ثابت لمنع الحظر
+            await new Promise(r => setTimeout(r, 500)); // تأخير ثابت لمنع اكتشاف الروبوت
         }
     }
     return lines.join('\n');
 }
 
+/**
+ * 2. المحرك الرئيسي للبحث الخارجي (SubDL)
+ */
 async function fetchAllPossibleSubs(fullId, videoFileName) {
     const API_KEY = process.env.SUBDL_API_KEY;
     const parts = fullId.split(':');
-    const technicalTags = (videoFileName || "").toUpperCase().match(/(BLURAY|WEB-DL|NF|WEBRIP|YTS|PSA|AMZN|H264)/g) || [];
+    const imdbId = parts[0];
+    const season = parts[1];
+    const episode = parts[2];
+    
+    // استخراج الكلمات الدلالية من اسم الفيلم للمزامنة (BluRay, YTS, etc)
+    const technicalTags = (videoFileName || "").toUpperCase().match(/(BLURAY|WEB-DL|NF|WEBRIP|YTS|PSA|AMZN|H264|H265)/g) || [];
+
+    let results = [];
 
     try {
-        let url = `https://api.subdl.com/api/v1/subtitles?imdb_id=${parts[0]}&api_key=${API_KEY}`;
-        if (parts[1]) url += `&season=${parts[1]}&episode=${parts[2]}`;
+        let baseUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${API_KEY}`;
+        if (season && episode) baseUrl += `&season=${season}&episode=${episode}`;
 
-        // 1. بحث عربي
-        const arRes = await axios.get(url + '&languages=ar').catch(() => null);
-        if (arRes?.data?.subtitles?.length > 0) return await processSubs(arRes.data.subtitles, "Original");
-
-        // 2. تعريب عالمي
-        const allRes = await axios.get(url).catch(() => null);
-        if (allRes?.data?.subtitles?.length > 0) {
-            const best = allRes.data.subtitles.sort((a,b) => {
-                const sA = technicalTags.filter(t => a.release_name.toUpperCase().includes(t)).length;
-                const sB = technicalTags.filter(t => b.release_name.toUpperCase().includes(t)).length;
-                return sB - sA;
-            })[0];
-            const content = await downloadAndUnzip(best.url);
-            const translated = await translateToArabic(content);
-            return [{ content: translated, releaseName: best.release_name, source: "AI" }];
+        // المرحلة الأولى: جلب كـــــل الترجمات العربية الأصلية المتوفرة
+        console.log(`[SCRAPER] 🔍 البحث عن ترجمات عربية أصلية لـ ${fullId}...`);
+        const arRes = await axios.get(`${baseUrl}&languages=ar`).catch(() => null);
+        
+        if (arRes?.data?.subtitles?.length > 0) {
+            console.log(`[SCRAPER] ✨ وجدنا ${arRes.data.subtitles.length} ترجمة عربية أصلية.`);
+            for (let s of arRes.data.subtitles) {
+                const content = await downloadAndUnzip(s.url);
+                if (content) {
+                    results.push({
+                        content: content,
+                        releaseName: s.release_name,
+                        source: "Original"
+                    });
+                }
+            }
+            // إذا وجدنا عربي أصلي، نكتفي به ونخرج
+            return results;
         }
-    } catch (e) { return []; }
+
+        // المرحلة الثانية: إذا لم نجد أي عربي (الخطة ب - تعريب AI)
+        if (results.length === 0) {
+            console.log(`[SCRAPER] 🌍 لا يوجد عربي أصلي. جاري البحث عن نسخة عالمية لتعريبها...`);
+            const allRes = await axios.get(baseUrl).catch(() => null);
+
+            if (allRes?.data?.subtitles?.length > 0) {
+                // ترتيب النسخ الأجنبية لاختيار الأكثر توافقاً مع اسم ملف الفيديو
+                const sortedSubs = allRes.data.subtitles.sort((a, b) => {
+                    const scoreA = technicalTags.filter(tag => a.release_name.toUpperCase().includes(tag)).length;
+                    const scoreB = technicalTags.filter(tag => b.release_name.toUpperCase().includes(tag)).length;
+                    return scoreB - scoreA;
+                });
+
+                const bestSub = sortedSubs[0]; // اختيار النسخة الأنسب (BluRay مثلاً)
+                console.log(`[SCRAPER-AI] 🎯 تعريب نسخة (${bestSub.lang}): ${bestSub.release_name}`);
+
+                const sourceContent = await downloadAndUnzip(bestSub.url);
+                const translatedContent = await translateToArabic(sourceContent);
+                
+                if (translatedContent) {
+                    results.push({ 
+                        content: translatedContent, 
+                        releaseName: bestSub.release_name, 
+                        source: "AI" 
+                    });
+                }
+            }
+        }
+    } catch (e) {
+        console.error(`[SCRAPER-ERROR] ❌ خطأ في البحث: ${e.message}`);
+    }
+    return results;
 }
 
+/**
+ * 3. دالة تحميل وفك ضغط ملف الـ Zip
+ */
 async function downloadAndUnzip(subUrl) {
     try {
         const res = await axios.get(`https://dl.subdl.com${subUrl}`, { responseType: 'arraybuffer' });
         const zip = new AdmZip(Buffer.from(res.data));
-        const entry = zip.getEntries().find(e => e.entryName.endsWith('.srt'));
-        return entry ? entry.getData().toString('utf8') : null;
-    } catch (e) { return null; }
-}
-
-async function processSubs(subs, type) {
-    let list = [];
-    for (let s of subs) {
-        const content = await downloadAndUnzip(s.url);
-        if (content) list.push({ content, releaseName: s.release_name, source: type });
+        const srtEntry = zip.getEntries().find(e => e.entryName.endsWith('.srt'));
+        return srtEntry ? srtEntry.getData().toString('utf8') : null;
+    } catch (err) {
+        console.error(`[UNZIP-ERROR] فشل تحميل/فك ضغط الملف: ${subUrl}`);
+        return null;
     }
-    return list;
 }
 
 module.exports = { fetchAllPossibleSubs, translateToArabic };
