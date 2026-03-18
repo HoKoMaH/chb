@@ -4,9 +4,9 @@ const { translate } = require('@vitalets/google-translate-api');
 
 /**
  * 1. محرك التعريب الذكي - يدعم (فارسي، إنجليزي، صيني) إلى العربية
- * تم دمج تقنية الانتظار التصاعدي وتصغير الدفعات لتجنب الحظر
+ * تم إضافة پارامتر onProgress لإرسال النسبة المئوية للواجهة الأمامية
  */
-async function translateToArabic(sourceSrt) {
+async function translateToArabic(sourceSrt, onProgress) {
     if (!sourceSrt) return null;
     
     // تنظيف النص من أي رموز غريبة قد تسبب فشل المكتبة
@@ -59,7 +59,13 @@ async function translateToArabic(sourceSrt) {
             batchTexts = [];
             batchIndices = [];
 
-            // لوقات التقدم كل 200 سطر
+            // إرسال النسبة المئوية لـ index.js إذا تم توفير الـ Callback
+            if (onProgress) {
+                let progressValue = Math.floor((i / lines.length) * 100);
+                onProgress(progressValue);
+            }
+
+            // لوقات التقدم في الكونسول كل 200 سطر
             if (i % 200 === 0) {
                 let progress = ((i / lines.length) * 100).toFixed(1);
                 console.log(`[PROGRESS] ⏳ تم معالجة ${progress}% (${i}/${lines.length} سطر)...`);
@@ -113,7 +119,8 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
             const sourceContent = await downloadAndUnzip(bestSub.url);
             
             if (sourceContent) {
-                const translated = await translateToArabic(sourceContent);
+                // نمرر null للنسبة المئوية هنا لأنها ترجمة خلفية تلقائية
+                const translated = await translateToArabic(sourceContent, null);
                 if (translated) {
                     results.push({ content: translated, releaseName: bestSub.release_name, source: "AI" });
                 }
