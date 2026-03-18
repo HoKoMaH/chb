@@ -3,12 +3,12 @@ const AdmZip = require('adm-zip');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { translate } = require('google-translate-api-x');
 
-// إعداد الهيدر لضمان عدم حظر الطلبات من SUBDL
+// إعدادات الوصول لمنع الحظر
 const axiosHeader = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
+    'Accept': 'application/json'
 };
 
-// إعداد المفاتيح السبعة من بيئة Render
 const keys = [
     process.env.GEMINI_KEY_1, process.env.GEMINI_KEY_2, process.env.GEMINI_KEY_3,
     process.env.GEMINI_KEY_4, process.env.GEMINI_KEY_5, process.env.GEMINI_KEY_6,
@@ -16,7 +16,7 @@ const keys = [
 ].filter(k => k && k.length > 20);
 
 /**
- * 1. دالة التحميل وفك الضغط (محسنة)
+ * 1. دالة التحميل وفك الضغط
  */
 async function downloadAndUnzip(subUrl) {
     try {
@@ -24,13 +24,12 @@ async function downloadAndUnzip(subUrl) {
         const res = await axios.get(fullUrl, { 
             responseType: 'arraybuffer', 
             headers: axiosHeader,
-            timeout: 15000 
+            timeout: 20000 
         });
         
         const zip = new AdmZip(Buffer.from(res.data));
         const entries = zip.getEntries();
         
-        // البحث عن ملف .srt حقيقي وتجاهل مخلفات النظام
         const srtEntry = entries.find(e => 
             e.entryName.toLowerCase().endsWith('.srt') && 
             !e.entryName.includes('MACOSX') &&
@@ -39,20 +38,18 @@ async function downloadAndUnzip(subUrl) {
         
         return srtEntry ? srtEntry.getData().toString('utf8') : null;
     } catch (err) {
-        console.error(`[ZIP-ERROR] ❌ فشل في فك ضغط ${subUrl}:`, err.message);
+        console.error(`[ZIP-ERROR] ❌ فشل التحميل: ${subUrl}`, err.message);
         return null;
     }
 }
 
 /**
- * 2. محرك الترجمة النفاث (Gemini + Fallback)
+ * 2. محرك الترجمة (Gemini + Fallback)
  */
 async function translateToArabic(sourceSrt, onProgress = null) {
     if (!sourceSrt) return "";
-    
     const lines = sourceSrt.replace(/\r/g, '').split('\n');
-    let textToTranslate = [];
-    let mapIndices = [];
+    let textToTranslate = [], mapIndices = [];
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
@@ -63,8 +60,8 @@ async function translateToArabic(sourceSrt, onProgress = null) {
     }
 
     const BATCH_SIZE = 45; 
-    let completedBatches = 0;
-    const totalBatches = Math.ceil(textToTranslate.length / BATCH_SIZE);
+    let completed = 0;
+    const total = Math.ceil(textToTranslate.length / BATCH_SIZE);
     let allPromises = [];
 
     for (let i = 0; i < textToTranslate.length; i += BATCH_SIZE) {
@@ -73,26 +70,23 @@ async function translateToArabic(sourceSrt, onProgress = null) {
         
         allPromises.push((async () => {
             try {
-                if (!key) throw new Error("Key Missing");
                 const model = new GoogleGenerativeAI(key).getGenerativeModel({ model: "gemini-1.5-flash" });
-                const prompt = `Translate this JSON array of subtitles to Arabic. Return ONLY the translated JSON array: ${JSON.stringify(batch)}`;
-                
+                const prompt = `Translate to Arabic. Return JSON array only: ${JSON.stringify(batch)}`;
                 const result = await model.generateContent(prompt);
                 let text = (await result.response).text().trim().replace(/```json/g, '').replace(/```/g, '');
-                
                 const parsed = JSON.parse(text);
-                completedBatches++;
-                if (onProgress) onProgress(Math.round((completedBatches / totalBatches) * 100));
+                completed++;
+                if (onProgress) onProgress(Math.round((completed / total) * 100));
                 return Array.isArray(parsed) ? parsed : batch;
-            } catch (err) {
+            } catch {
                 try {
                     const res = await translate(batch, { to: 'ar' });
-                    completedBatches++;
-                    if (onProgress) onProgress(Math.round((completedBatches / totalBatches) * 100));
+                    completed++;
+                    if (onProgress) onProgress(Math.round((completed / total) * 100));
                     return res.map(item => item.text);
                 } catch {
-                    completedBatches++;
-                    if (onProgress) onProgress(Math.round((completedBatches / totalBatches) * 100));
+                    completed++;
+                    if (onProgress) onProgress(Math.round((completed / total) * 100));
                     return batch;
                 }
             }
@@ -101,20 +95,15 @@ async function translateToArabic(sourceSrt, onProgress = null) {
 
     const results = await Promise.all(allPromises);
     const finalResults = [].concat(...results);
-
-    for (let i = 0; i < mapIndices.length; i++) {
-        lines[mapIndices[i]] = finalResults[i] || lines[mapIndices[i]];
-    }
-    
+    for (let i = 0; i < mapIndices.length; i++) lines[mapIndices[i]] = finalResults[i] || lines[mapIndices[i]];
     return lines.join('\n');
 }
 
 /**
- * 3. المحرك الرئيسي للبحث (getSmartSubtitles)
+ * 3. المحرك الرئيسي (البحث، الحفظ، العرض)
  */
 async function getSmartSubtitles(fullId, SubtitleModel) {
     const API_KEY = process.env.SUBDL_API_KEY;
-    // التأكد من أن الـ ID يبدأ بـ tt
     const cleanId = fullId.startsWith('tt') ? fullId : `tt${fullId}`;
     const [imdbId, season, episode] = cleanId.split(':');
     let results = [];
@@ -123,35 +112,42 @@ async function getSmartSubtitles(fullId, SubtitleModel) {
         let baseUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${API_KEY}`;
         if (season && episode) baseUrl += `&season=${season}&episode=${episode}`;
 
-        // المرحلة 1: البحث عن ترجمات عربية أصلية
-        console.log(`[SCRAPER] 🔍 جاري البحث عن ترجمات عربية في SUBDL لـ ${cleanId}...`);
+        // المرحلة 1: جلب وحفظ الترجمات العربية الأصلية
+        console.log(`[SCRAPER] 🔍 جاري سحب الترجمات لـ ${cleanId}...`);
         const arRes = await axios.get(`${baseUrl}&languages=ar`, { headers: axiosHeader }).catch(() => null);
         
         if (arRes?.data?.status === true && arRes.data.subtitles?.length > 0) {
-            console.log(`[SCRAPER] ✨ تم العثور على ${arRes.data.subtitles.length} ترجمة عربية.`);
-            for (let s of arRes.data.subtitles.slice(0, 5)) {
+            console.log(`[SCRAPER] ✨ وجدنا ${arRes.data.subtitles.length} ملف. جاري المزامنة مع قاعدة البيانات...`);
+            
+            for (let s of arRes.data.subtitles.slice(0, 8)) {
                 const content = await downloadAndUnzip(s.url);
                 if (content) {
-                    results.push({
-                        arabicText: content,
-                        label: s.release_name,
-                        isAI: false,
-                        fileId: `${cleanId.replace(/:/g,'_')}_org_${Math.random().toString(36).substr(2, 4)}`
-                    });
+                    const uniqueFileId = `${cleanId.replace(/:/g,'_')}_org_${s.subs_id || Math.random().toString(36).substr(2, 5)}`;
+                    
+                    // الحفظ أو التحديث لضمان ظهورها في Stats
+                    const savedSub = await SubtitleModel.findOneAndUpdate(
+                        { fileId: uniqueFileId },
+                        {
+                            fileId: uniqueFileId,
+                            imdbId: cleanId,
+                            arabicText: content,
+                            label: s.release_name || 'Original Arabic',
+                            isAI: false
+                        },
+                        { upsert: true, new: true }
+                    );
+                    results.push(savedSub);
                 }
             }
             if (results.length > 0) return results;
         }
 
-        // المرحلة 2: البحث في قاعدة البيانات عن تعريبات سابقة
+        // المرحلة 2: البحث في المخزن المحلي (إذا لم نجد جديداً من SUBDL)
         const localSubs = await SubtitleModel.find({ imdbId: cleanId });
-        if (localSubs.length > 0) {
-            console.log(`[SCRAPER] 💾 تم استرجاع ${localSubs.length} ترجمة من قاعدة البيانات.`);
-            return localSubs;
-        }
+        if (localSubs.length > 0) return localSubs;
 
-        // المرحلة 3: سحب نسخة إنجليزية وتعريبها فوراً
-        console.log(`[SCRAPER] 🌍 لا يوجد ترجمة عربية جاهزة. جاري تعريب النسخة الإنجليزية...`);
+        // المرحلة 3: التعريب الآلي (إذا كان الفيلم جديداً تماماً ولا يوجد له ترجمة عربية)
+        console.log(`[SCRAPER] 🌍 لا يوجد ملف عربي. جاري بدء التعريب الآلي...`);
         const enRes = await axios.get(`${baseUrl}&languages=en`, { headers: axiosHeader }).catch(() => null);
         
         if (enRes?.data?.subtitles?.length > 0) {
@@ -173,7 +169,7 @@ async function getSmartSubtitles(fullId, SubtitleModel) {
             }
         }
     } catch (e) {
-        console.error(`[SCRAPER-FATAL] ❌ خطأ في المحرك: ${e.message}`);
+        console.error(`[SCRAPER-ERROR]:`, e.message);
     }
     return results;
 }
