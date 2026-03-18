@@ -9,110 +9,100 @@ const API_KEYS = [
 ].map(k => k ? k.trim() : null).filter(k => k);
 
 let currentKeyIndex = 0;
-
 function getNextKey() {
-    if (API_KEYS.length === 0) return null;
     const key = API_KEYS[currentKeyIndex];
     currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length;
     return key;
 }
 
-/**
- * 1. دالة الترجمة الفردية مع LOGS
- */
-async function translateLineContent(text, index) {
-    if (!text || text.trim() === "" || text.includes('-->') || /^\d+$/.test(text.trim())) return text;
-
+// دالة ترجمة مجموعة أسطر (Batch) لضمان السرعة وعدم الانقطاع
+async function translateBatch(batchLines) {
+    if (batchLines.length === 0) return [];
     const key = getNextKey();
-    if (!key) {
-        console.error(`[LOG-ERR] لا يوجد مفتاح API للسطر ${index}`);
-        return text;
-    }
-
     try {
         const genAI = new GoogleGenerativeAI(key);
-        const model = genAI.getGenerativeModel({ 
-            model: "gemini-1.5-flash",
-            safetySettings: [
-                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
-                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
-            ]
-        });
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-        const prompt = `Translate to Arabic: ${text}`;
+        // نطلب الترجمة مع فاصل مميز لضمان الترتيب
+        const prompt = `Translate these movie subtitles to Arabic. Keep order. Return ONLY translations separated by " | ":\n${batchLines.join('\n')}`;
+        
         const result = await model.generateContent(prompt);
-        const responseText = (await result.response).text().trim();
-
-        if (!responseText) {
-            console.warn(`[LOG-WARN] استجابة فارغة من Gemini للسطر ${index}`);
-            return text;
+        const response = await result.response;
+        const text = response.text().trim();
+        
+        // تقسيم الاستجابة وإعادة النصوص المترجمة
+        let translated = text.split('|').map(t => t.trim());
+        
+        // تأمين: إذا نقص سطر نرجعه من الأصل
+        while (translated.length < batchLines.length) {
+            translated.push(batchLines[translated.length]);
         }
-
-        return responseText.replace(/^["']|["']$/g, '');
+        return translated;
     } catch (e) {
-        console.error(`[LOG-API-ERR] سطر ${index}: ${e.message.substring(0, 50)}`);
-        return text;
+        console.error("Batch Error:", e.message);
+        return batchLines; // العودة للأصل عند الخطأ
     }
 }
 
-/**
- * 2. الدالة الرئيسية للمعالجة (التي ظهر فيها الخطأ)
- */
 async function translateToArabic(sourceSrt) {
-    if (!sourceSrt) {
-        console.error("[LOG-ERR] النص المصدر (sourceSrt) فارغ!");
-        return "";
-    }
-
-    console.log("[LOG-INFO] بدأت دالة translateToArabic العمل...");
+    if (!sourceSrt) return "";
+    
+    console.log("[SYSTEM] بدء المعالجة الشاملة للملف...");
     const lines = sourceSrt.replace(/\r/g, '').split('\n');
-    let finalSrtArray = [];
+    let textToTranslate = [];
+    let mapIndices = [];
 
+    // تصفية النصوص التي تحتاج ترجمة فقط
     for (let i = 0; i < lines.length; i++) {
-        let line = lines[i];
-
-        if (line.includes('-->') || /^\d+$/.test(line.trim()) || line.trim() === "") {
-            finalSrtArray.push(line);
-        } else {
-            const translated = await translateLineContent(line, i);
-            finalSrtArray.push(translated);
-        }
-
-        // لوق للتأكد من أن المصفوفة تمتلئ
-        if (i < 3 || i % 100 === 0) {
-            console.log(`[LOG-PROGRESS] معالجة السطر ${i}/${lines.length}... المصفوفة الآن: ${finalSrtArray.length}`);
+        const line = lines[i].trim();
+        if (line && !line.includes('-->') && !/^\d+$/.test(line)) {
+            textToTranslate.push(line);
+            mapIndices.push(i);
         }
     }
 
-    const result = finalSrtArray.join('\n');
-    console.log(`[LOG-DONE] انتهت المعالجة. طول النص النهائي: ${result.length}`);
-    return result;
+    // تقسيم العمل لمجموعات (كل مجموعة 20 سطر) لسرعة خرافية
+    const BATCH_SIZE = 20;
+    let finalResults = [];
+    
+    for (let i = 0; i < textToTranslate.length; i += BATCH_SIZE) {
+        const batch = textToTranslate.slice(i, i + BATCH_SIZE);
+        console.log(`[PROGRESS] Translating chunk ${i} to ${i + BATCH_SIZE}...`);
+        const translatedBatch = await translateBatch(batch);
+        finalResults.push(...translatedBatch);
+    }
+
+    // إعادة دمج الأسطر المترجمة في هيكل الـ SRT الأصلي
+    for (let i = 0; i < mapIndices.length; i++) {
+        lines[mapIndices[i]] = finalResults[i] || lines[mapIndices[i]];
+    }
+
+    return lines.join('\n');
 }
 
-/**
- * 3. دالة جلب الملفات
- */
-async function fetchAllPossibleSubs(fullId, videoFileName) {
+async function fetchAllPossibleSubs(fullId) {
     const SUBDL_API_KEY = process.env.SUBDL_API_KEY;
     const [imdbId, season, episode] = fullId.split(':');
-    
     try {
-        let baseUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${SUBDL_API_KEY}`;
-        if (season && episode) baseUrl += `&season=${season}&episode=${episode}`;
+        let url = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${SUBDL_API_KEY}`;
+        if (season && season !== 'undefined') url += `&season=${season}&episode=${episode}`;
 
-        const allRes = await axios.get(baseUrl).catch(() => null);
-        if (allRes?.data?.subtitles?.length > 0) {
-            const s = allRes.data.subtitles[0]; 
-            const content = await downloadAndUnzip(s.url);
-            if (content) {
-                // استدعاء الدالة داخل نفس الملف
-                const translated = await translateToArabic(content);
-                return [{ content: translated, releaseName: s.release_name, source: `AI Arabic` }];
-            }
+        const res = await axios.get(url);
+        if (!res.data.subtitles) return [];
+
+        // نختار الترجمة الإنجليزية أو أول نتيجة متاحة
+        const sub = res.data.subtitles.find(s => s.lang === 'english') || res.data.subtitles[0];
+        const content = await downloadAndUnzip(sub.url);
+        
+        if (content) {
+            const translatedContent = await translateToArabic(content);
+            return [{
+                content: translatedContent,
+                releaseName: sub.release_name,
+                source: "AI Arabic (Sequential)"
+            }];
         }
-    } catch (e) { console.error(`[LOG-FETCHER-ERR] ${e.message}`); }
+    } catch (e) { console.error("Fetcher Error:", e.message); }
     return [];
 }
 
@@ -125,8 +115,4 @@ async function downloadAndUnzip(subUrl) {
     } catch (err) { return null; }
 }
 
-// هــــــــام جــــــــداً: التصدير الصحيح لكي لا يظهر خطأ "not a function"
-module.exports = { 
-    fetchAllPossibleSubs, 
-    translateToArabic 
-};
+module.exports = { fetchAllPossibleSubs, translateToArabic };
