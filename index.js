@@ -167,7 +167,7 @@ app.get("/stats", async (req, res) => {
         </style></head>
         <body>
             <div style="max-width: 900px; margin: auto; text-align:center;">
-                <h1>📊 إدارة ترجمات AR.SA</h1>
+                <h1>📊 إدارة الترجمات</h1>
                 <a href="${installUrl}" style="background:#8e44ad; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold; display:inline-block; margin-bottom:20px;">+ تثبيت الإضافة في Stremio</a>
                 <div class="stats-grid">
                     <div class="card" style="border-top:4px solid #3498db;"><h3>الإجمالي</h3><p>${totalSubs}</p></div>
@@ -200,7 +200,7 @@ app.get("/stats", async (req, res) => {
                 </div>
                 <div class="card">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; padding:0 10px;">
-                        <h3 style="margin:0;">📁 الترجمات الأخيرة</h3>
+                        <h3 style="margin:0;">📁 الترجمات</h3>
                         <button onclick="deleteAllSubtitles()" class="danger-btn">حذف كل الترجمات ⚠️</button>
                     </div>
                     <table style="width:100%; border-collapse:collapse; text-align:right;">
