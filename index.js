@@ -48,26 +48,33 @@ app.get("/search-id", async (req, res) => {
 });
 
 /**
- * 5. مسار التعريب المباشر مع دعم النسبة المئوية
+ * 5. مسار التعريب المباشر (إصدار البث الآمن للملفات الضخمة)
  */
 app.post("/instant-translate", async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    const sendLog = (msg) => res.write(`data: ${msg}\n\n`);
+    res.setHeader('X-Accel-Buffering', 'no'); // هامة لمنع التقطيع في Render
+
+    const sendLog = (msg) => {
+        const cleanMsg = msg.replace(/\n/g, ' ');
+        res.write(`data: ${cleanMsg}\n\n`);
+    };
 
     try {
-        sendLog("🚀 بدء عملية التعريب الشامل...");
+        sendLog("🚀 بدء عملية التعريب الشامل عبر محرك البحث السريع...");
         if (!req.body.text || req.body.text.length < 10) throw new Error("النص قصير جداً.");
         
-        // استدعاء المترجم مع الـ Callback الخاص بالنسبة المئوية
+        // استدعاء المترجم مع تمرير دالة النسبة المئوية
         const translated = await translateToArabic(req.body.text, (percent) => {
             sendLog(`⏳ جاري المعالجة: ${percent}%`);
         });
 
         if (translated && translated.length > 10) {
             sendLog("✅ تمت عملية الترجمة بنجاح 100%");
-            res.write(`data: [RESULT]${translated}\n\n`);
+            // نغلف النتيجة بـ JSON لضمان وصولها كاملة دون تأثر ببروتوكول SSE
+            const resultData = JSON.stringify({ result: translated });
+            res.write(`data: [RESULT]${resultData}\n\n`);
         } else {
             throw new Error("فشل التعريب.");
         }
@@ -113,7 +120,7 @@ app.post("/adjust-sync", async (req, res) => {
 });
 
 /**
- * 7. واجهة التعديل (Edit Page) مع شريط التقدم
+ * 7. واجهة التعديل (Edit Page) مع سكريبت استقبال البيانات المطور
  */
 app.get("/edit/:fileId", async (req, res) => {
     const sub = await Subtitle.findOne({ fileId: req.params.fileId });
@@ -162,7 +169,7 @@ app.get("/edit/:fileId", async (req, res) => {
             function addLog(m) { const w = document.getElementById('logWin'); w.style.display='block'; w.innerHTML+='<div>'+m+'</div>'; w.scrollTop=w.scrollHeight; }
             
             async function startInstantTranslate() {
-                if(!confirm('هل تريد تعريب هذا الملف يدوياً؟ قد يستغرق الأمر دقيقة.')) return;
+                if(!confirm('هل تريد تعريب هذا الملف يدوياً؟')) return;
                 const logW = document.getElementById('logWin'); logW.innerHTML=''; 
                 const pCont = document.getElementById('pCont'); pCont.style.display='block';
                 const pBar = document.getElementById('pBar'); pBar.style.width = '0%';
@@ -176,24 +183,38 @@ app.get("/edit/:fileId", async (req, res) => {
 
                 const reader = response.body.getReader();
                 const decoder = new TextDecoder();
+                let accumulatedData = '';
 
                 while (true) {
                     const { value, done } = await reader.read();
                     if (done) break;
-                    const chunk = decoder.decode(value);
-                    const lines = chunk.split('\\n\\n');
-                    for (let line of lines) {
-                        if (line.startsWith('data: ')) {
-                            const data = line.replace('data: ', '');
+                    
+                    accumulatedData += decoder.decode(value);
+                    const chunks = accumulatedData.split('\\n\\n');
+                    
+                    // الاحتفاظ بآخر قطعة غير مكتملة
+                    accumulatedData = chunks.pop();
+
+                    for (let chunk of chunks) {
+                        if (chunk.startsWith('data: ')) {
+                            const data = chunk.replace('data: ', '');
+                            
                             if (data.startsWith('[RESULT]')) {
-                                document.getElementById('txt').value = data.replace('[RESULT]', '');
-                                document.getElementById('status').innerText = '✅ اكتمل التعريب!';
-                                pBar.style.width = '100%';
+                                try {
+                                    const jsonContent = data.replace('[RESULT]', '');
+                                    const parsed = JSON.parse(jsonContent);
+                                    document.getElementById('txt').value = parsed.result;
+                                    document.getElementById('status').innerText = '✅ اكتمل التعريب!';
+                                    pBar.style.width = '100%';
+                                } catch(e) { console.error("Parse error", e); }
                             } else if (data.includes('%')) {
-                                const percent = data.match(/\\d+/)[0];
-                                pBar.style.width = percent + '%';
-                                document.getElementById('status').innerText = '⏳ جاري المعالجة: ' + percent + '%';
-                                addLog(data);
+                                const percentMatch = data.match(/\\d+/);
+                                if(percentMatch) {
+                                    const percent = percentMatch[0];
+                                    pBar.style.width = percent + '%';
+                                    document.getElementById('status').innerText = '⏳ جاري المعالجة: ' + percent + '%';
+                                    addLog(data);
+                                }
                             } else {
                                 addLog(data);
                             }
@@ -210,7 +231,7 @@ app.get("/edit/:fileId", async (req, res) => {
 
             function downloadSrt() {
                 const blob = new Blob([document.getElementById('txt').value], { type: 'text/plain' });
-                const a = document.createElement('a'); a.download = "${sub.label}.srt"; a.href = window.URL.createObjectURL(blob); a.click();
+                const a = document.createElement('a'); a.download = "${sub.label.replace(/'/g, '')}.srt"; a.href = window.URL.createObjectURL(blob); a.click();
             }
         </script>
     </body></html>`);
