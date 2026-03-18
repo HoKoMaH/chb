@@ -2,136 +2,81 @@ const axios = require('axios');
 const AdmZip = require('adm-zip');
 const { translate } = require('@vitalets/google-translate-api');
 
-/**
- * 1. دالة التعريب الذكية (تجاوز الحظر + عداد النسبة)
- * مصممة للتعامل مع ضغط سيرفرات جوجل والملفات التي تزيد عن 5000 سطر
- */
 async function translateToArabic(sourceSrt) {
     if (!sourceSrt) return null;
-    
     const lines = sourceSrt.split('\n');
-    let batchTexts = [];
-    let batchIndices = [];
+    let batchTexts = [], batchIndices = [];
     const totalLines = lines.length;
-    let processedLines = 0;
 
-    console.log(`[TRANSLATOR] 🤖 بدء تعريب ملف ضخم (${totalLines} سطر).. جاري العمل بنظام التبريد لتجنب الحظر.`);
+    console.log(`[TRANSLATOR] 🤖 معالجة ${totalLines} سطر بنظام التبريد...`);
 
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i].trim();
-        
-        // استخراج النصوص فقط
         if (line && !line.includes('-->') && isNaN(line)) {
             batchTexts.push(line);
             batchIndices.push(i);
         }
 
-        // معالجة دفعات صغيرة (10 أسطر) لتقليل حجم الطلب الواحد
         if (batchTexts.length === 10 || (i === lines.length - 1 && batchTexts.length > 0)) {
-            let success = false;
-            let retries = 5; // عدد محاولات إعادة الاتصال في حال الحظر
-
+            let success = false, retries = 5;
             while (!success && retries > 0) {
                 try {
                     const res = await translate(batchTexts.join(' | '), { to: 'ar' });
-                    
                     if (res && res.text) {
-                        const translatedParts = res.text.split(' | ');
+                        const parts = res.text.split(' | ');
                         for (let j = 0; j < batchIndices.length; j++) {
-                            lines[batchIndices[j]] = translatedParts[j] || batchTexts[j];
+                            lines[batchIndices[j]] = parts[j] || batchTexts[j];
                         }
                         success = true;
                     }
                 } catch (e) {
                     retries--;
-                    if (e.message.includes('Too Many Requests') || e.status === 429) {
-                        console.log(`[WAIT] ⚠️ حظر مؤقت من جوجل عند السطر ${i}.. سأنتظر 5 ثوانٍ (المحاولات: ${retries})`);
-                        await new Promise(resolve => setTimeout(resolve, 5000)); // انتظر 5 ثواني لتهدئة السيرفر
-                    } else {
-                        console.error(`[ERROR] خطأ غير متوقع: ${e.message}`);
-                        break; 
-                    }
+                    console.log(`[WAIT] ⚠️ ضغط عند السطر ${i}.. انتظار 5 ثوانٍ...`);
+                    await new Promise(r => setTimeout(r, 5000));
                 }
             }
-            
-            // تحديث لوق النسبة المئوية كل 50 سطر لتقليل زحمة اللوقات
-            processedLines = i;
-            if (i % 50 === 0 || i === totalLines - 1) {
-                const percentage = ((processedLines / totalLines) * 100).toFixed(1);
-                console.log(`[PROGRESS] ⏳ تم إنجاز: ${percentage}% (${processedLines}/${totalLines})`);
-            }
-
-            // تأخير ثابت (نصف ثانية) بين كل طلب وآخر ليوهم جوجل أن المستخدم بشري
-            await new Promise(resolve => setTimeout(resolve, 500));
+            if (i % 100 === 0) console.log(`[PROGRESS] ⏳ ${((i/totalLines)*100).toFixed(1)}%`);
+            await new Promise(r => setTimeout(r, 500)); // تأخير ثابت لمنع الحظر
         }
     }
-    
-    console.log(`[TRANSLATOR] ✅ اكتمل التعريب بنجاح 100% رغم ضخامة الملف.`);
     return lines.join('\n');
 }
 
-/**
- * 2. المحرك الأساسي للبحث الشامل
- */
 async function fetchAllPossibleSubs(fullId, videoFileName) {
     const API_KEY = process.env.SUBDL_API_KEY;
-    const [imdbId, season, episode] = fullId.split(':');
-    let results = [];
-
-    const technicalTags = (videoFileName || "").toUpperCase().match(/(BLURAY|WEB-DL|NF|WEBRIP|BRRIP|YTS|PSA|AMZN|DSNP|H264|H265)/g) || [];
+    const parts = fullId.split(':');
+    const technicalTags = (videoFileName || "").toUpperCase().match(/(BLURAY|WEB-DL|NF|WEBRIP|YTS|PSA|AMZN|H264)/g) || [];
 
     try {
-        let baseUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${API_KEY}`;
-        if (season && episode) baseUrl += `&season=${season}&episode=${episode}`;
+        let url = `https://api.subdl.com/api/v1/subtitles?imdb_id=${parts[0]}&api_key=${API_KEY}`;
+        if (parts[1]) url += `&season=${parts[1]}&episode=${parts[2]}`;
 
-        // المرحلة 1: البحث عن العربي الأصلي
-        const arRes = await axios.get(`${baseUrl}&languages=ar`).catch(() => null);
-        if (arRes?.data?.subtitles?.length > 0) {
-            console.log(`[SCRAPER] ✨ وجدنا ${arRes.data.subtitles.length} مصدر عربي أصلي.`);
-            results = await processSubs(arRes.data.subtitles, "Original");
-        } 
+        // 1. بحث عربي
+        const arRes = await axios.get(url + '&languages=ar').catch(() => null);
+        if (arRes?.data?.subtitles?.length > 0) return await processSubs(arRes.data.subtitles, "Original");
 
-        // المرحلة 2: التعريب العالمي (إذا لم يتوفر عربي)
-        if (results.length === 0) {
-            console.log(`[SCRAPER] 🌍 لا يوجد عربي. جاري اصطياد نسخة عالمية للمزامنة والتعريب...`);
-            const allRes = await axios.get(`${baseUrl}`).catch(() => null);
-
-            if (allRes?.data?.subtitles?.length > 0) {
-                const sortedSubs = allRes.data.subtitles.sort((a, b) => {
-                    const scoreA = technicalTags.filter(tag => a.release_name.toUpperCase().includes(tag)).length;
-                    const scoreB = technicalTags.filter(tag => b.release_name.toUpperCase().includes(tag)).length;
-                    return scoreB - scoreA;
-                });
-
-                const bestSub = sortedSubs[0];
-                console.log(`[SCRAPER-AI] 🎯 اختيار نسخة (${bestSub.lang}) للتعريب: ${bestSub.release_name}`);
-
-                const sourceSrt = await downloadAndUnzip(bestSub.url);
-                const translatedContent = await translateToArabic(sourceSrt);
-                
-                if (translatedContent) {
-                    results.push({ 
-                        content: translatedContent, 
-                        releaseName: bestSub.release_name, 
-                        source: "AI" 
-                    });
-                }
-            }
+        // 2. تعريب عالمي
+        const allRes = await axios.get(url).catch(() => null);
+        if (allRes?.data?.subtitles?.length > 0) {
+            const best = allRes.data.subtitles.sort((a,b) => {
+                const sA = technicalTags.filter(t => a.release_name.toUpperCase().includes(t)).length;
+                const sB = technicalTags.filter(t => b.release_name.toUpperCase().includes(t)).length;
+                return sB - sA;
+            })[0];
+            const content = await downloadAndUnzip(best.url);
+            const translated = await translateToArabic(content);
+            return [{ content: translated, releaseName: best.release_name, source: "AI" }];
         }
-    } catch (e) { console.error(`[SCRAPER-CRITICAL] ❌ خطأ: ${e.message}`); }
-    return results;
+    } catch (e) { return []; }
 }
 
-/**
- * 3. الدوال المساعدة
- */
 async function downloadAndUnzip(subUrl) {
     try {
         const res = await axios.get(`https://dl.subdl.com${subUrl}`, { responseType: 'arraybuffer' });
         const zip = new AdmZip(Buffer.from(res.data));
-        const srtEntry = zip.getEntries().find(e => e.entryName.endsWith('.srt'));
-        return srtEntry ? srtEntry.getData().toString('utf8') : null;
-    } catch (err) { return null; }
+        const entry = zip.getEntries().find(e => e.entryName.endsWith('.srt'));
+        return entry ? entry.getData().toString('utf8') : null;
+    } catch (e) { return null; }
 }
 
 async function processSubs(subs, type) {
@@ -143,7 +88,4 @@ async function processSubs(subs, type) {
     return list;
 }
 
-/**
- * 4. تصدير الدوال
- */
 module.exports = { fetchAllPossibleSubs, translateToArabic };
