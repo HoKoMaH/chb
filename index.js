@@ -66,38 +66,59 @@ app.post("/adjust-sync", async (req, res) => {
     } catch (e) { res.status(500).send(req.body.text); }
 });
 
-// واجهة التعديل
+/**
+ * واجهة التعديل مع زر التحميل الجديد 📥
+ */
 app.get("/edit/:fileId", async (req, res) => {
     const sub = await Subtitle.findOne({ fileId: req.params.fileId });
     if (!sub) return res.send("الملف غير موجود");
     res.send(`
     <html dir="rtl"><body style="font-family:sans-serif; padding:20px; background:#f4f7f6;">
         <div style="max-width:1000px; margin:auto; background:white; padding:25px; border-radius:15px; box-shadow:0 4px 15px rgba(0,0,0,0.1);">
-            <h2>🛠️ محرر الترجمة: ${sub.label}</h2>
-            <div style="background:#f8f9fa; padding:15px; border-radius:10px; margin-bottom:15px; display:flex; gap:10px; align-items:center;">
-                <button onclick="instantTranslate()" style="background:#8e44ad; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">🤖 تعريب فوري</button>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <h2 style="margin:0;">🛠️ محرر الترجمة: ${sub.label}</h2>
+                <button onclick="downloadSrt()" style="background:#34495e; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer; font-weight:bold;">📥 تحميل الملف (SRT)</button>
+            </div>
+            
+            <div style="background:#f8f9fa; padding:15px; border-radius:10px; margin-bottom:15px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                <b>🤖 ذكاء اصطناعي:</b>
+                <button onclick="instantTranslate()" style="background:#8e44ad; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">تعريب النص</button>
+                <b style="margin-right:20px;">⏱️ مزامنة:</b>
                 <button onclick="shiftSync(-0.5)" style="background:#e67e22; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer;">-0.5s</button>
                 <button onclick="shiftSync(0.5)" style="background:#3498db; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer;">+0.5s</button>
-                <span id="status" style="color:#27ae60; font-weight:bold;"></span>
+                <span id="status" style="color:#27ae60; font-weight:bold; margin-right:10px;"></span>
             </div>
+
             <form action="/save-edit" method="POST">
                 <input type="hidden" name="fileId" value="${sub.fileId}">
-                <textarea id="txt" name="newText" style="width:100%; height:60vh; padding:15px; border-radius:10px; font-family:monospace;">${sub.arabicText}</textarea>
+                <textarea id="txt" name="newText" style="width:100%; height:60vh; padding:15px; border-radius:10px; border:1px solid #ddd; font-family:monospace; line-height:1.6;">${sub.arabicText}</textarea>
                 <div style="text-align:center; margin-top:20px;">
-                    <button type="submit" style="background:#2ecc71; color:white; padding:15px 50px; border:none; border-radius:10px; cursor:pointer; font-weight:bold;">حفظ ✅</button>
-                    <a href="/stats" style="margin-right:20px; color:#666;">إلغاء</a>
+                    <button type="submit" style="background:#2ecc71; color:white; padding:15px 50px; border:none; border-radius:10px; cursor:pointer; font-weight:bold; font-size:16px;">حفظ واعتماد التعديلات ✅</button>
+                    <a href="/stats" style="margin-right:20px; color:#666; text-decoration:none;">إلغاء</a>
                 </div>
             </form>
         </div>
         <script>
+            // دالة التحميل المباشر للجهاز
+            function downloadSrt() {
+                const text = document.getElementById('txt').value;
+                const blob = new Blob([text], { type: 'text/plain' });
+                const anchor = document.createElement('a');
+                anchor.download = "${sub.label}.srt";
+                anchor.href = (window.webkitURL || window.URL).createObjectURL(blob);
+                anchor.dataset.downloadurl = ['text/plain', anchor.download, anchor.href].join(':');
+                anchor.click();
+            }
+
             async function instantTranslate() {
-                if(!confirm('بدء التعريب؟')) return;
-                document.getElementById('status').innerText = '⏳ جاري...';
+                if(!confirm('هل تريد بدء التعريب الآلي؟')) return;
+                document.getElementById('status').innerText = '⏳ جاري التعريب..';
                 const res = await fetch('/instant-translate', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ text: document.getElementById('txt').value }) });
                 const result = await res.text();
-                if(result) { document.getElementById('txt').value = result; document.getElementById('status').innerText = '✅ تم'; }
+                if(result) { document.getElementById('txt').value = result; document.getElementById('status').innerText = '✅ تم التعريب'; }
             }
             async function shiftSync(offset) {
+                document.getElementById('status').innerText = '⏳ معالجة التوقيت..';
                 const res = await fetch('/adjust-sync', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ text: document.getElementById('txt').value, offset }) });
                 const result = await res.text();
                 if(result) { document.getElementById('txt').value = result; document.getElementById('status').innerText = '✅ تم التعديل'; }
@@ -106,7 +127,7 @@ app.get("/edit/:fileId", async (req, res) => {
     </body></html>`);
 });
 
-// واجهة الإحصائيات مع ميزة النسخ والتعرف على النتائج
+// واجهة الإحصائيات (stats)
 app.get("/stats", async (req, res) => {
     try {
         const totalSubs = await Subtitle.countDocuments();
@@ -138,15 +159,13 @@ app.get("/stats", async (req, res) => {
         </style></head>
         <body>
             <div style="max-width: 900px; margin: auto; text-align:center;">
-                <h1>📊 لوحة التحكم بالأضافة</h1>
+                <h1>📊 لوحة تحكم AR.SA</h1>
                 <a href="${installUrl}" style="background:#8e44ad; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold; display:inline-block; margin-bottom:20px;">+ تثبيت في Stremio</a>
-                
                 <div class="stats-grid">
                     <div class="card" style="border-top:4px solid #3498db;"><h3>الإجمالي</h3><p>${totalSubs}</p></div>
                     <div class="card" style="border-top:4px solid #2ecc71;"><h3>🤖 AI</h3><p>${aiSubs}</p></div>
                     <div class="card" style="border-top:4px solid #f1c40f;"><h3>أصلي</h3><p>${totalSubs - aiSubs}</p></div>
                 </div>
-
                 <div class="grid-2">
                     <div class="card">
                         <h3>🔍 بحث IMDb ID</h3>
@@ -171,7 +190,6 @@ app.get("/stats", async (req, res) => {
                         </form>
                     </div>
                 </div>
-
                 <div class="card"><table style="width:100%; border-collapse:collapse;">
                     <thead style="background:#f8f9fa;"><tr><th>المحتوى</th><th>النوع</th><th>الإجراء</th></tr></thead>
                     <tbody>${rows}</tbody>
@@ -179,55 +197,27 @@ app.get("/stats", async (req, res) => {
             </div>
             <script>
                 function toggleFields(){ document.getElementById('sFields').style.display = document.getElementById('type').value==='series'?'flex':'none'; }
-                
                 async function search(){
-                    const query = document.getElementById('q').value;
-                    if(!query) return;
-                    document.getElementById('r').innerHTML = '⏳ جاري البحث...';
-                    const res = await fetch('/search-id?q=' + query);
-                    const data = await res.json();
-                    
-                    if(data.length === 0) {
-                        document.getElementById('r').innerHTML = '❌ لم يتم العثور على نتائج';
-                        return;
-                    }
-
+                    const q = document.getElementById('q').value; if(!q) return;
+                    const res = await fetch('/search-id?q=' + q); const data = await res.json();
                     document.getElementById('r').innerHTML = data.slice(0,8).map(i => {
-                        const title = i.l;
-                        const year = i.y ? '('+i.y+')' : '';
-                        const id = i.id;
-                        const isSeries = i.q === 'TV series';
-                        return \`
-                            <div class="search-item" onclick="copyToUpload('\${id}', '\${title}', \${isSeries})">
-                                <b>\${title} \${year}</b> - <code>\${id}</code> 
-                                <span style="font-size:10px; color:#666;">(\${i.q || 'Content'})</span>
-                            </div>
-                        \`;
+                        return \`<div class="search-item" onclick="copyToUpload('\${i.id}', '\${i.l}', \${i.q === 'TV series'})"><b>\${i.l} (\${i.y})</b> - <code>\${i.id}</code></div>\`;
                     }).join('');
                 }
-
                 function copyToUpload(id, title, isSeries) {
-                    // نسخ الـ ID للخانة
                     document.getElementById('manual_id').value = id;
-                    // نسخ الاسم لخانة الرفع (اختياري لتسهيل العمل)
-                    document.getElementById('manual_label').value = title + ' - ';
-                    
-                    // تغيير النوع تلقائياً
-                    const typeSelect = document.getElementById('type');
-                    typeSelect.value = isSeries ? 'series' : 'movie';
+                    document.getElementById('manual_label').value = title;
+                    document.getElementById('type').value = isSeries ? 'series' : 'movie';
                     toggleFields();
-
-                    // نسخ للـ Clipboard
                     navigator.clipboard.writeText(id);
-                    
-                    alert('✅ تم نسخ الـ ID: ' + id + '\\nوتم تعبئة بيانات الرفع تلقائياً!');
+                    alert('✅ تم النسخ والتعبئة!');
                 }
             </script>
         </body></html>`);
     } catch (e) { res.status(500).send("Error"); }
 });
 
-// المسارات الخلفية (Upload, Instant, Save, Delete, Sub) كما هي...
+// المسارات الخلفية
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     try {
         let { imdbId, type, season, episode, label } = req.body;
