@@ -216,7 +216,6 @@ app.get("/stats", async (req, res) => {
                     document.getElementById('type').value = isSeries ? 'series' : 'movie';
                     toggleFields();
                     navigator.clipboard.writeText(id);
-                    alert('✅ تم اختيار: ' + title);
                 }
             </script>
         </body></html>`);
