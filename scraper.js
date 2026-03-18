@@ -3,11 +3,11 @@ const AdmZip = require('adm-zip');
 const { translate } = require('@vitalets/google-translate-api');
 
 /**
- * دالة التعريب الذكية: تكتشف اللغة تلقائياً وتحولها للعربية
+ * دالة التعريب الذكية: تكتشف اللغة الأصلية وتحولها للعربية
  */
 async function translateToArabic(sourceSrt) {
     if (!sourceSrt) return null;
-    console.log("[TRANSLATOR] 🤖 اكتشاف اللغة الأصلية وبدء التعريب الشامل...");
+    console.log("[TRANSLATOR] 🤖 بدء عملية التعريب الشامل لأي لغة متاحة...");
     
     const lines = sourceSrt.split('\n');
     let batchTexts = [];
@@ -24,7 +24,7 @@ async function translateToArabic(sourceSrt) {
 
         if (batchTexts.length === 15 || (i === lines.length - 1 && batchTexts.length > 0)) {
             try {
-                // نترك 'from' فارغة ليقوم المترجم باكتشاف اللغة (إنجليزي، فرنسي، صيني.. إلخ) تلقائياً
+                // كشف اللغة تلقائياً والترجمة للعربي
                 const res = await translate(batchTexts.join(' | '), { to: 'ar' });
                 
                 if (res && res.text) {
@@ -51,31 +51,30 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
     const [imdbId, season, episode] = fullId.split(':');
     let results = [];
 
-    // استخراج الكلمات المفتاحية للمزامنة (BluRay, WEB-DL, YTS...)
+    // استخراج وسوم المزامنة (YTS, BluRay, PSA...)
     const technicalTags = (videoFileName || "").toUpperCase().match(/(BLURAY|WEB-DL|NF|WEBRIP|BRRIP|YTS|PSA|AMZN|DSNP|H264|H265)/g) || [];
 
     try {
         let baseUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${API_KEY}`;
         if (season && episode) baseUrl += `&season=${season}&episode=${episode}`;
 
-        // المرحلة الأولى: البحث عن كل المصادر العربية المتاحة
-        console.log(`[SCRAPER] 🔍 المرحلة 1: البحث عن ترجمات عربية أصلية...`);
+        // المرحلة 1: جلب "كافة" المصادر العربية المتاحة بلا استثناء
+        console.log(`[SCRAPER] 🔍 المرحلة 1: جلب كافة الترجمات العربية الأصلية...`);
         const arRes = await axios.get(`${baseUrl}&languages=ar`).catch(() => null);
         
         if (arRes?.data?.subtitles?.length > 0) {
-            console.log(`[SCRAPER] ✨ تم العثور على ${arRes.data.subtitles.length} مصدر عربي.`);
-            // جلب أفضل نسختين عربيتين (لضمان التنوع في حال كانت واحدة منهما غير متوافقة)
-            results = await processSubs(arRes.data.subtitles.slice(0, 3), "Original");
+            console.log(`[SCRAPER] ✨ تم العثور على ${arRes.data.subtitles.length} ملف عربي. جاري التحميل...`);
+            // نقوم بمعالجة "كل" الملفات المرجعة من الـ API
+            results = await processSubs(arRes.data.subtitles, "Original");
         } 
 
-        // المرحلة الثانية: إذا لم نجد أي مصدر عربي، نبحث في كل اللغات ونعرب الأفضل
+        // المرحلة 2: إذا لم يوجد أي ملف عربي نهائياً، نبحث عالمياً ونترجم الأفضل
         if (results.length === 0) {
-            console.log(`[SCRAPER] 🌍 المرحلة 2: لم نجد عربي. جاري البحث في كافة اللغات العالمية...`);
-            // نطلب كل اللغات المتاحة بدون فلترة
+            console.log(`[SCRAPER] 🌍 المرحلة 2: لا يوجد عربي. البحث عن أفضل نسخة عالمية للمزامنة...`);
             const allRes = await axios.get(`${baseUrl}`).catch(() => null);
 
             if (allRes?.data?.subtitles?.length > 0) {
-                // ترتيب النتائج بناءً على "المطابقة الفنية" لاسم الملف لضمان المزامنة
+                // ترتيب بناءً على مطابقة اسم الملف
                 const sortedSubs = allRes.data.subtitles.sort((a, b) => {
                     const scoreA = technicalTags.filter(tag => a.release_name.toUpperCase().includes(tag)).length;
                     const scoreB = technicalTags.filter(tag => b.release_name.toUpperCase().includes(tag)).length;
@@ -83,7 +82,7 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
                 });
 
                 const bestSub = sortedSubs[0];
-                console.log(`[SCRAPER-AI] 🎯 اختيار نسخة عالمية (${bestSub.lang}) للتعريب: ${bestSub.release_name}`);
+                console.log(`[SCRAPER-AI] 🎯 تعريب نسخة (${bestSub.lang}): ${bestSub.release_name}`);
 
                 const sourceSrt = await downloadAndUnzip(bestSub.url);
                 const translatedAr = await translateToArabic(sourceSrt);
@@ -95,11 +94,9 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
                         source: "AI" 
                     });
                 }
-            } else {
-                console.log(`[SCRAPER] ❌ لا توجد أي ترجمة متوفرة لهذا المحتوى بأي لغة.`);
             }
         }
-    } catch (e) { console.error(`[SCRAPER-CRITICAL] ❌ خطأ فادح: ${e.message}`); }
+    } catch (e) { console.error(`[SCRAPER-CRITICAL] ❌ خطأ: ${e.message}`); }
     return results;
 }
 
@@ -113,7 +110,7 @@ async function downloadAndUnzip(subUrl) {
     } catch (err) { return null; }
 }
 
-// معالجة وحفظ الترجمات الأصلية
+// معالجة وحفظ الترجمات
 async function processSubs(subs, type) {
     let list = [];
     for (let s of subs) {
