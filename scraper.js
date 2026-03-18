@@ -3,49 +3,77 @@ const AdmZip = require('adm-zip');
 const { translate } = require('@vitalets/google-translate-api');
 
 /**
- * 1. محرك التعريب الذكي (نظام التبريد لتجنب الحظر)
+ * 1. محرك التعريب الذكي (إصدار الملفات الضخمة + إجبار العربية)
+ * @param {string} sourceSrt - نص ملف SRT الأصلي
  */
 async function translateToArabic(sourceSrt) {
     if (!sourceSrt) return null;
+    
     const lines = sourceSrt.split('\n');
-    let batchTexts = [], batchIndices = [];
-    const totalLines = lines.length;
-
-    console.log(`[TRANSLATOR] 🤖 تعريب آلي لـ ${totalLines} سطر...`);
+    let translatedLines = [...lines]; // نسخة مطابقة للعمل عليها
+    let batchTexts = [];
+    let batchIndices = [];
+    
+    console.log(`[TRANSLATOR] 🚀 بدء تعريب ملف ضخم (${lines.length} سطر)...`);
 
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i].trim();
+        
+        // تصفية الأسطر: نأخذ فقط النصوص (نتجاهل التوقيت والأرقام)
         if (line && !line.includes('-->') && isNaN(line)) {
             batchTexts.push(line);
             batchIndices.push(i);
         }
 
-        if (batchTexts.length === 10 || (i === lines.length - 1 && batchTexts.length > 0)) {
-            let success = false, retries = 5;
+        // معالجة دفعات صغيرة جداً (5 أسطر فقط) لضمان استقرار الترجمة من أي لغة (فارسي، صيني، إلخ)
+        if (batchTexts.length === 5 || (i === lines.length - 1 && batchTexts.length > 0)) {
+            let success = false;
+            let retries = 3;
+
             while (!success && retries > 0) {
                 try {
-                    const res = await translate(batchTexts.join(' | '), { to: 'ar' });
+                    // forceTo: true تجبر المحرك على التحويل للعربية مهما كانت لغة المصدر
+                    const res = await translate(batchTexts.join(' \n '), { 
+                        to: 'ar', 
+                        forceTo: true 
+                    });
+                    
                     if (res && res.text) {
-                        const parts = res.text.split(' | ');
+                        const translatedParts = res.text.split('\n');
                         for (let j = 0; j < batchIndices.length; j++) {
-                            lines[batchIndices[j]] = parts[j] || batchTexts[j];
+                            // وضع النص المترجم في مكانه مع الحفاظ على هيكل الملف
+                            translatedLines[batchIndices[j]] = translatedParts[j]?.trim() || batchTexts[j];
                         }
                         success = true;
                     }
                 } catch (e) {
                     retries--;
-                    await new Promise(r => setTimeout(r, 5000));
+                    console.log(`[WAIT] ⚠️ ضغط مؤقت من جوجل.. انتظار 4 ثوانٍ...`);
+                    await new Promise(r => setTimeout(r, 4000));
                 }
             }
-            if (i % 100 === 0) console.log(`[PROGRESS] ⏳ ${((i/totalLines)*100).toFixed(1)}%`);
+            
+            // تفريغ الدفعة الحالية
+            batchTexts = [];
+            batchIndices = [];
+
+            // تحديث اللوقات كل 100 سطر لمراقبة التقدم في Render
+            if (i % 100 === 0) {
+                let progress = ((i / lines.length) * 100).toFixed(1);
+                console.log(`[PROGRESS] ⏳ اكتمل ${progress}% (${i}/${lines.length} سطر)`);
+            }
+            
+            // أهم خطوة: تأخير بسيط (Cooldown) لمنع حظر الـ IP
             await new Promise(r => setTimeout(r, 500)); 
         }
     }
-    return lines.join('\n');
+    
+    console.log(`[TRANSLATOR] ✅ اكتمل تعريب الملف بالكامل بنجاح.`);
+    return translatedLines.join('\n');
 }
 
 /**
- * 2. المحرك الرئيسي (جلب كــــل المصادر بلا استثناء)
+ * 2. جلب كافة الترجمات من SubDL (يدعم المسلسلات والأفلام)
  */
 async function fetchAllPossibleSubs(fullId, videoFileName) {
     const API_KEY = process.env.SUBDL_API_KEY;
@@ -58,67 +86,51 @@ async function fetchAllPossibleSubs(fullId, videoFileName) {
         let baseUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${API_KEY}`;
         if (season && episode) baseUrl += `&season=${season}&episode=${episode}`;
 
-        // المرحلة الأولى: جلب جـمـيـع الترجمات العربية المتوفرة
-        console.log(`[SCRAPER] 🔍 جاري سحب كـل الترجمات العربية لـ ${fullId}...`);
+        // البحث عن العربية الأصلية أولاً
+        console.log(`[SCRAPER] 🔍 جلب الترجمات العربية لـ ${fullId}...`);
         const arRes = await axios.get(`${baseUrl}&languages=ar`).catch(() => null);
         
         if (arRes?.data?.subtitles?.length > 0) {
-            console.log(`[SCRAPER] ✨ تم العثور على ${arRes.data.subtitles.length} ملف عربي.`);
-            
-            // حلقة تكرار تمر على كل الملفات العربية وتجلبها كلها
             for (let s of arRes.data.subtitles) {
                 const content = await downloadAndUnzip(s.url);
                 if (content) {
-                    results.push({
-                        content: content,
-                        releaseName: s.release_name,
-                        source: "Original"
-                    });
+                    results.push({ content, releaseName: s.release_name, source: "Original" });
                 }
             }
-            // إذا وجدنا عربي أصلي، نكتفي به ونعرض الكل
-            return results;
+            return results; // نكتفي بالأصلي إذا وجد
         }
 
-        // المرحلة الثانية: التعريب (إذا لم يوجد أي ملف عربي نهائياً)
-        if (results.length === 0) {
-            console.log(`[SCRAPER] 🌍 لا يوجد عربي أصلي. جاري البحث عن نسخة عالمية متوافقة...`);
-            const allRes = await axios.get(baseUrl).catch(() => null);
+        // إذا لم يوجد عربي، نجلب أفضل نسخة أجنبية ونعربها آلياً
+        const allRes = await axios.get(baseUrl).catch(() => null);
+        if (allRes?.data?.subtitles?.length > 0) {
+            const sortedSubs = allRes.data.subtitles.sort((a, b) => {
+                const scoreA = technicalTags.filter(tag => a.release_name.toUpperCase().includes(tag)).length;
+                const scoreB = technicalTags.filter(tag => b.release_name.toUpperCase().includes(tag)).length;
+                return scoreB - scoreA;
+            });
 
-            if (allRes?.data?.subtitles?.length > 0) {
-                const sortedSubs = allRes.data.subtitles.sort((a, b) => {
-                    const scoreA = technicalTags.filter(tag => a.release_name.toUpperCase().includes(tag)).length;
-                    const scoreB = technicalTags.filter(tag => b.release_name.toUpperCase().includes(tag)).length;
-                    return scoreB - scoreA;
-                });
-
-                const bestSub = sortedSubs[0]; 
-                const sourceContent = await downloadAndUnzip(bestSub.url);
-                const translatedContent = await translateToArabic(sourceContent);
-                
-                if (translatedContent) {
-                    results.push({ 
-                        content: translatedContent, 
-                        releaseName: bestSub.release_name, 
-                        source: "AI" 
-                    });
-                }
+            const bestSub = sortedSubs[0]; 
+            const sourceContent = await downloadAndUnzip(bestSub.url);
+            const translatedContent = await translateToArabic(sourceContent);
+            
+            if (translatedContent) {
+                results.push({ content: translatedContent, releaseName: bestSub.release_name, source: "AI" });
             }
         }
     } catch (e) {
-        console.error(`[SCRAPER-ERROR] ❌ فشل الجلب: ${e.message}`);
+        console.error(`[SCRAPER-ERROR] ❌: ${e.message}`);
     }
     return results;
 }
 
 /**
- * 3. دالة فك الضغط
+ * 3. تحميل وفك ضغط ملفات SubDL
  */
 async function downloadAndUnzip(subUrl) {
     try {
         const res = await axios.get(`https://dl.subdl.com${subUrl}`, { responseType: 'arraybuffer' });
         const zip = new AdmZip(Buffer.from(res.data));
-        const srtEntry = zip.getEntries().find(e => e.entryName.endsWith('.srt'));
+        const srtEntry = zip.getEntries().find(e => e.entryName.toLowerCase().endsWith('.srt'));
         return srtEntry ? srtEntry.getData().toString('utf8') : null;
     } catch (err) {
         return null;
