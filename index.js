@@ -133,7 +133,7 @@ app.get("/edit/:fileId", async (req, res) => {
 });
 
 /**
- * 7. لوحة التحكم (Stats) مع البحث التلقائي
+ * 7. لوحة التحكم (Stats)
  */
 app.get("/stats", async (req, res) => {
     try {
@@ -190,8 +190,8 @@ app.get("/stats", async (req, res) => {
                                 <input type="number" name="season" placeholder="موسم" style="width:50%">
                                 <input type="number" name="episode" placeholder="حلقة" style="width:50%">
                             </div>
-                            <input name="label" id="manual_label" placeholder="اسم النسخة" required>
-                            <input type="file" name="subtitleFile" accept=".srt" required>
+                            <input name="label" id="manual_label" placeholder="اسم النسخة" required title="يتم تعبئته تلقائياً عند اختيار ملف">
+                            <input type="file" id="subFile" name="subtitleFile" accept=".srt" required onchange="updateLabel(this)">
                             <button type="submit" style="background:#27ae60; color:white; font-weight:bold;">حفظ في السيرفر</button>
                         </form>
                     </div>
@@ -205,7 +205,14 @@ app.get("/stats", async (req, res) => {
                 let timer;
                 function toggleFields(){ document.getElementById('sFields').style.display = document.getElementById('type').value==='series'?'flex':'none'; }
                 
-                // دالة البحث التلقائي بمجرد التوقف عن الكتابة
+                // ميزة استخراج اسم الملف ووضعه في اسم النسخة
+                function updateLabel(input) {
+                    if (input.files && input.files[0]) {
+                        const fileName = input.files[0].name.replace('.srt', '');
+                        document.getElementById('manual_label').value = fileName;
+                    }
+                }
+
                 function autoSearch() {
                     clearTimeout(timer);
                     const q = document.getElementById('q').value;
@@ -218,12 +225,15 @@ app.get("/stats", async (req, res) => {
                         document.getElementById('r').innerHTML = data.slice(0,8).map(i => {
                             return \`<div class="search-item" onclick="copyToUpload('\${i.id}', '\${i.l}', \${i.q === 'TV series'}, event)"><b>\${i.l} (\${i.y || ''})</b> - <code>\${i.id}</code></div>\`;
                         }).join('');
-                    }, 500); // الانتظار لمدة 500 ملي ثانية
+                    }, 500);
                 }
 
                 function copyToUpload(id, title, isSeries, event) {
                     document.getElementById('manual_id').value = id;
-                    document.getElementById('manual_label').value = title;
+                    // لا نغير الـ label هنا إذا كان المستخدم قد اختار ملفاً بالفعل
+                    if(!document.getElementById('manual_label').value) {
+                         document.getElementById('manual_label').value = title;
+                    }
                     document.getElementById('type').value = isSeries ? 'series' : 'movie';
                     toggleFields();
                     navigator.clipboard.writeText(id);
