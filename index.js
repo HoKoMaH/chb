@@ -247,11 +247,11 @@ app.get("/stats", async (req, res) => {
     }).join('');
 
     res.send(`
-    <html dir="rtl"><head><meta charset="UTF-8"><title>لوحة التحكم | AR.SA</title>${commonCSS}</head>
+    <html dir="rtl"><head><meta charset="UTF-8"><title>أدارة ترجمات| Stremio</title>${commonCSS}</head>
     <body>
         <div style="max-width:1100px; margin:auto;">
             <div style="text-align:center; margin-bottom:30px;">
-                <h1>📊 لوحة التحكم AR.SA 📊</h1>
+                <h1>📊  أدارة ترجمات Stremio 📊</h1>
                 <a href="${installUrl}" class="btn" style="background:#8e44ad; padding:15px 40px; border-radius:50px; font-size:1.1rem;">+ تثبيت الإضافة في Stremio</a>
             </div>
 
