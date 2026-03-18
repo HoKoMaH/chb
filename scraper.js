@@ -3,7 +3,7 @@ const AdmZip = require('adm-zip');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { translate } = require('google-translate-api-x');
 
-// إعداد المفاتيح (7 مفاتيح)
+// إعداد مفاتيح Gemini (تأكد من إضافتها في Render)
 const keys = [
     process.env.GEMINI_KEY_1, process.env.GEMINI_KEY_2, process.env.GEMINI_KEY_3,
     process.env.GEMINI_KEY_4, process.env.GEMINI_KEY_5, process.env.GEMINI_KEY_6,
@@ -11,32 +11,34 @@ const keys = [
 ].filter(k => k && k.length > 20);
 
 /**
- * دالة البحث والجلب الشاملة (Subdl)
- * @param {string} fullId - IMDb ID (tt...)
- * @param {string} lang - اللغة المطلوبة (arabic أو english)
+ * 1. البحث في OpenSubtitles (باستخدام فكرة المستودع الذي أرسلته)
  */
-async function fetchFromSubdl(fullId, lang = 'arabic') {
-    const API_KEY = process.env.SUBDL_API_KEY;
-    const [imdbId, season, episode] = fullId.split(':');
+async function fetchFromOpenSubs(imdbId, lang = 'ara') {
     try {
-        let url = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${API_KEY}&languages=${lang}`;
-        if (season && episode) url += `&season=${season}&episode=${episode}`;
-
-        const res = await axios.get(url);
-        const subs = res.data.subtitles || [];
+        // ملاحظة: OpenSubtitles يتطلب User-Agent أو API Key في النسخ الجديدة
+        // هنا نستخدم البحث المباشر عن طريق الـ ID
+        const response = await axios.get(`https://rest.opensubtitles.org/search/imdbid-${imdbId}/sublanguageid-${lang}`, {
+            headers: { 'User-Agent': 'TemporaryUserAgent' }
+        });
         
-        if (subs.length > 0) {
-            // نأخذ أول نتيجة (الأكثر توافقاً عادة)
-            const sub = subs[0];
-            const content = await downloadAndUnzip(sub.url);
-            return content ? { content, releaseName: sub.release_name } : null;
+        if (response.data && response.data.length > 0) {
+            const sub = response.data[0];
+            const downloadRes = await axios.get(sub.SubDownloadLink, { responseType: 'arraybuffer' });
+            // فك الضغط إذا كان بصيغة gz أو zip
+            const content = sub.SubDownloadLink.endsWith('.gz') 
+                ? require('zlib').gunzipSync(Buffer.from(downloadRes.data)).toString('utf-8')
+                : downloadRes.data.toString('utf-8');
+            
+            return { content, label: sub.MovieReleaseName || sub.SubFileName };
         }
-    } catch (e) { console.error(`[SUBDL-ERR] Error fetching ${lang}:`, e.message); }
+    } catch (e) {
+        console.error("OpenSubs Error:", e.message);
+    }
     return null;
 }
 
 /**
- * المحرك النفاث للترجمة (المتوازي)
+ * 2. محرك الترجمة النفاث (Parallel AI)
  */
 async function translateToArabic(sourceSrt) {
     if (!sourceSrt) return "";
@@ -52,7 +54,7 @@ async function translateToArabic(sourceSrt) {
         }
     }
 
-    const BATCH_SIZE = 40;
+    const BATCH_SIZE = 45; // حجم دفعة أكبر للسرعة
     let allPromises = [];
 
     for (let i = 0; i < textToTranslate.length; i += BATCH_SIZE) {
@@ -61,7 +63,7 @@ async function translateToArabic(sourceSrt) {
         
         allPromises.push((async () => {
             try {
-                if (!key) throw new Error("No Key");
+                if (!key) throw new Error();
                 const genAI = new GoogleGenerativeAI(key);
                 const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
                 const result = await model.generateContent(`Translate to Arabic JSON array: ${JSON.stringify(batch)}`);
@@ -84,49 +86,38 @@ async function translateToArabic(sourceSrt) {
 }
 
 /**
- * الدالة المركزية المطلوبة في الـ Addon
+ * 3. الدالة المركزية الذكية (Smart Engine)
  */
 async function getSmartSubtitles(fullId, SubtitleModel) {
-    // 1. محاولة جلب ترجمة عربية جاهزة من الموقع
-    const onlineArabic = await fetchFromSubdl(fullId, 'arabic');
-    if (onlineArabic) {
-        return [{ content: onlineArabic.content, label: onlineArabic.releaseName, isAI: false }];
-    }
+    const imdbIdOnly = fullId.split(':')[0].replace('tt', '');
 
-    // 2. محاولة البحث في القاعدة (إذا لم نجد عربي في الموقع)
+    // أولوية 1: البحث عن ترجمة عربية جاهزة في OpenSubtitles
+    const osArabic = await fetchFromOpenSubs(imdbIdOnly, 'ara');
+    if (osArabic) return [{ content: osArabic.content, label: osArabic.label, isAI: false }];
+
+    // أولوية 2: البحث في قاعدة بياناتك (MongoDB)
     const localSubs = await SubtitleModel.find({ imdbId: fullId });
-    if (localSubs.length > 0) {
-        return localSubs.map(s => ({ content: s.arabicText, label: s.label, isAI: s.isAI }));
-    }
+    if (localSubs.length > 0) return localSubs.map(s => ({ content: s.arabicText, label: s.label, isAI: s.isAI }));
 
-    // 3. المرحلة الأخيرة: تعريب ترجمة إنجليزية (أو غيرها)
-    const onlineEnglish = await fetchFromSubdl(fullId, 'english');
-    if (onlineEnglish) {
-        const translated = await translateToArabic(onlineEnglish.content);
+    // أولوية 3: سحب ترجمة إنجليزية وتعريبها فوراً
+    const osEnglish = await fetchFromOpenSubs(imdbIdOnly, 'eng');
+    if (osEnglish) {
+        const translated = await translateToArabic(osEnglish.content);
         
-        // حفظها في القاعدة فوراً للمستقبل
-        const newFileId = `${fullId.replace(/:/g, '_')}_ai_${Date.now()}`;
+        // حفظ في القاعدة للسرعة مستقبلاً
+        const fileId = `${fullId.replace(/:/g, '_')}_ai_${Date.now()}`;
         await SubtitleModel.create({
-            fileId: newFileId,
+            fileId: fileId,
             imdbId: fullId,
             arabicText: translated,
-            label: onlineEnglish.releaseName,
+            label: osEnglish.label,
             isAI: true
         });
 
-        return [{ content: translated, label: onlineEnglish.releaseName, isAI: true }];
+        return [{ content: translated, label: osEnglish.label, isAI: true }];
     }
 
     return [];
 }
 
-async function downloadAndUnzip(subUrl) {
-    try {
-        const res = await axios.get(`https://dl.subdl.com${subUrl}`, { responseType: 'arraybuffer' });
-        const zip = new AdmZip(Buffer.from(res.data));
-        const srtEntry = zip.getEntries().find(e => e.entryName.toLowerCase().endsWith('.srt') && !e.entryName.includes('MACOSX'));
-        return srtEntry ? srtEntry.getData().toString('utf8') : null;
-    } catch { return null; }
-}
-
-module.exports = { getSmartSubtitles, translateToArabic };
+module.exports = { getSmartSubtitles };
