@@ -10,20 +10,20 @@ const upload = multer({ storage: multer.memoryStorage() });
 const app = express();
 
 /**
- * 1. إعدادات استقبال البيانات
+ * 1. إعدادات استقبال البيانات والملفات الضخمة
  */
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 /**
- * 2. الاتصال بقاعدة البيانات
+ * 2. الاتصال بقاعدة البيانات (MongoDB)
  */
 mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log("✅ [DATABASE] Connected"))
-    .catch(err => console.error("❌ [DATABASE] Error:", err));
+    .then(() => console.log("✅ [DATABASE] Connected Successfully"))
+    .catch(err => console.error("❌ [DATABASE] Connection Error:", err));
 
 /**
- * 3. الموديل
+ * 3. تعريف الموديل (Subtitle Schema)
  */
 const SubtitleSchema = new mongoose.Schema({
     fileId: { type: String, unique: true },
@@ -36,7 +36,7 @@ const SubtitleSchema = new mongoose.Schema({
 const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
 
 /**
- * 4. CSS المطور (تحسين الخطوط والألوان والـ IMDb ID)
+ * 4. CSS المطور (الألوان والوضع الليلي والـ ID)
  */
 const commonCSS = `
 <style>
@@ -46,7 +46,7 @@ const commonCSS = `
     }
     body.dark-mode { 
         --bg: #121212; --card: #1e1e1e; --text: #ffffff; --text-dim: #b2bec3; 
-        --border: #2d3436; --accent: #f1c40f; --imdb-bg: rgba(241, 196, 15, 0.15); --imdb-text: #f1c40f;
+        --border: #2d3436; --accent: #f1c40f; --imdb-bg: rgba(241, 196, 15, 0.2); --imdb-text: #f1c40f;
     }
     
     body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 20px; transition: 0.3s; line-height: 1.6; }
@@ -54,7 +54,6 @@ const commonCSS = `
     
     h1, h2, h3 { color: var(--text); }
     
-    /* تمييز الـ IMDb ID */
     .imdb-badge {
         background: var(--imdb-bg);
         color: var(--imdb-text);
@@ -76,7 +75,7 @@ const commonCSS = `
         display: flex; align-items: center; justify-content: center;
     }
 
-    .btn { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; color: white; transition: 0.3s; text-decoration: none; display: inline-block; border: none; }
+    .btn { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; color: white; transition: 0.3s; text-decoration: none; display: inline-block; text-align: center; }
     .btn:hover { opacity: 0.8; transform: translateY(-1px); }
     
     table { width: 100%; border-collapse: collapse; text-align: right; margin-top: 10px; }
@@ -145,7 +144,7 @@ app.post("/adjust-sync", async (req, res) => {
 });
 
 /**
- * 6. واجهة التعديل
+ * 6. واجهة التعديل (مع زر الإلغاء)
  */
 app.get("/edit/:fileId", async (req, res) => {
     const sub = await Subtitle.findOne({ fileId: req.params.fileId });
@@ -156,7 +155,10 @@ app.get("/edit/:fileId", async (req, res) => {
         <div class="box">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
                 <h2>🛠️ محرر الترجمة: ${sub.label}</h2>
-                <button onclick="downloadSrt()" class="btn" style="background:#34495e;">📥 تحميل SRT</button>
+                <div>
+                    <button onclick="downloadSrt()" class="btn" style="background:#34495e; margin-left:5px;">📥 تحميل SRT</button>
+                    <a href="/stats" class="btn" style="background:#7f8c8d;">❌ إلغاء</a>
+                </div>
             </div>
             <div id="pCont" style="width:100%; background:#eee; height:8px; border-radius:10px; margin-bottom:10px; display:none; overflow:hidden;"><div id="pBar" style="width:0%; height:100%; background:#2ecc71; transition:0.3s;"></div></div>
             <div id="logWin" style="background:#000; color:#0f0; padding:10px; border-radius:8px; font-family:monospace; font-size:12px; max-height:80px; overflow-y:auto; margin-bottom:10px; display:none;"></div>
@@ -171,8 +173,9 @@ app.get("/edit/:fileId", async (req, res) => {
             <form action="/save-edit" method="POST">
                 <input type="hidden" name="fileId" value="${sub.fileId}">
                 <textarea id="txt" name="newText" style="height:60vh; font-family:monospace;">${sub.arabicText}</textarea>
-                <div style="text-align:center; margin-top:15px;">
-                    <button type="submit" class="btn" style="background:#2ecc71; padding:12px 40px;">حفظ التغييرات ✅</button>
+                <div style="text-align:center; margin-top:20px; display:flex; justify-content:center; gap:15px;">
+                    <button type="submit" class="btn" style="background:#2ecc71; padding:12px 60px; font-size:1.1rem;">حفظ التغييرات ✅</button>
+                    <a href="/stats" class="btn" style="background:#95a5a6; padding:12px 30px; font-size:1.1rem;">العودة للخلف</a>
                 </div>
             </form>
         </div>
@@ -222,7 +225,6 @@ app.get("/stats", async (req, res) => {
     let rows = latest.map(s => {
         const shortLabel = s.label.length > 50 ? s.label.substring(0, 47) + "..." : s.label;
         const timeAgo = new Date(s.createdAt).toLocaleDateString('ar-EG');
-        
         return `
         <tr>
             <td style="padding:15px 12px;">
@@ -249,41 +251,41 @@ app.get("/stats", async (req, res) => {
     <body>
         <div style="max-width:1100px; margin:auto;">
             <div style="text-align:center; margin-bottom:30px;">
-                <h1 style="font-size:2.5rem; margin-bottom:10px;">📊 لوحة التحكم AR.SA 📊</h1>
-                <a href="${installUrl}" class="btn" style="background:#8e44ad; padding:15px 40px; border-radius:50px; font-size:1.1rem; box-shadow:0 4px 15px rgba(142,68,173,0.3);">+ تثبيت الإضافة في Stremio</a>
+                <h1>📊 لوحة التحكم AR.SA 📊</h1>
+                <a href="${installUrl}" class="btn" style="background:#8e44ad; padding:15px 40px; border-radius:50px; font-size:1.1rem;">+ تثبيت الإضافة في Stremio</a>
             </div>
 
             <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:20px; margin-bottom:30px; text-align:center;">
                 <div class="card" style="border-top:5px solid #3498db;"><h3>الإجمالي</h3><h2 style="font-size:2rem;">${total}</h2></div>
                 <div class="card" style="border-top:5px solid #8e44ad;"><h3>🤖 تعريب AI</h3><h2 style="font-size:2rem;">${ai}</h2></div>
-                <div class="card" style="border-top:5px solid #27ae60;"><h3>🇸🇦 ترجمة أصلية</h3><h2 style="font-size:2rem;">${total - ai}</h2></div>
+                <div class="card" style="border-top:5px solid #27ae60;"><h3>🇸🇦 أصلية</h3><h2 style="font-size:2rem;">${total - ai}</h2></div>
             </div>
 
             <div style="display:grid; grid-template-columns: 1fr 1fr; gap:25px;">
                 <div class="card">
                     <h3>🔍 بحث IMDb ID</h3>
-                    <input id="q" placeholder="ابحث عن اسم الفيلم أو المسلسل..." oninput="autoSearch()">
-                    <div id="r" style="margin-top:10px; max-height:250px; overflow:auto; border-radius:8px; background:rgba(0,0,0,0.02);"></div>
+                    <input id="q" placeholder="ابحث عن اسم الفيلم..." oninput="autoSearch()">
+                    <div id="r" style="margin-top:10px; max-height:250px; overflow:auto; border-radius:8px;"></div>
                 </div>
                 <div class="card">
-                    <h3>📤 رفع ملف ترجمة يدوي</h3>
+                    <h3>📤 رفع ملف يدوي</h3>
                     <form action="/upload-manual" method="POST" enctype="multipart/form-data">
                         <select name="type" id="type" onchange="document.getElementById('sF').style.display=this.value==='series'?'flex':'none'">
-                            <option value="movie">🎬 فيلم سينمائي</option><option value="series">📺 مسلسل تلفزيوني</option>
+                            <option value="movie">🎬 فيلم</option><option value="series">📺 مسلسل</option>
                         </select>
                         <input name="imdbId" id="mid" placeholder="tt0000000" required>
                         <div id="sF" style="display:none; gap:10px;"><input type="number" name="season" placeholder="موسم" style="width:50%"><input type="number" name="episode" placeholder="حلقة" style="width:50%"></div>
-                        <input name="label" id="mlab" placeholder="اسم النسخة (مثال: BluRay / WEBRip)" required>
-                        <input type="file" name="subtitleFile" accept=".srt" required style="border:none; padding:10px 0;">
-                        <button type="submit" class="btn" style="background:#27ae60; width:100%; padding:15px; font-size:1rem; margin-top:5px;">✅ حفظ الملف في القاعدة</button>
+                        <input name="label" id="mlab" placeholder="اسم النسخة" required>
+                        <input type="file" name="subtitleFile" accept=".srt" required>
+                        <button type="submit" class="btn" style="background:#27ae60; width:100%; padding:15px; margin-top:5px;">✅ حفظ الملف</button>
                     </form>
                 </div>
             </div>
 
             <div class="card">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                    <h3 style="margin:0;">📁 أحدث الملفات المضافة</h3>
-                    <a href="/delete-all-now" onclick="return confirm('هل أنت متأكد من حذف كافة البيانات؟')" class="btn" style="background:#c0392b; font-size:0.9rem;">⚠️ مسح السجل بالكامل</a>
+                    <h3 style="margin:0;">📁 أحدث الملفات</h3>
+                    <a href="/delete-all-now" onclick="return confirm('حذف الكل؟')" class="btn" style="background:#c0392b; font-size:0.9rem;">⚠️ مسح السجل</a>
                 </div>
                 <table>
                     <thead><tr><th style="width:60%;">المحتوى والمعرف</th><th style="text-align:center;">المصدر</th><th style="text-align:center;">خيارات</th></tr></thead>
@@ -299,7 +301,7 @@ app.get("/stats", async (req, res) => {
                 if(q.length<2) return;
                 t=setTimeout(async()=>{
                     const res=await fetch('/search-id?q='+q); const d=await res.json();
-                    document.getElementById('r').innerHTML = d.map(i=>\`<div style="padding:12px; border-bottom:1px solid var(--border); cursor:pointer; transition:0.2s;" onmouseover="this.style.background='rgba(0,0,0,0.05)'" onmouseout="this.style.background='transparent'" onclick="document.getElementById('mid').value='\${i.id}'; document.getElementById('type').value='\${i.q==='TV series'?'series':'movie'}';"><b>\${i.l}</b> (\${i.y})</div>\`).join('');
+                    document.getElementById('r').innerHTML = d.map(i=>\`<div style="padding:12px; border-bottom:1px solid var(--border); cursor:pointer;" onclick="document.getElementById('mid').value='\${i.id}'; document.getElementById('type').value='\${i.q==='TV series'?'series':'movie'}';"><b>\${i.l}</b> (\${i.y})</div>\`).join('');
                 },500);
             }
         </script>
@@ -307,7 +309,7 @@ app.get("/stats", async (req, res) => {
 });
 
 /**
- * 8. باقي المسارات
+ * 8. باقي المسارات (Upload, Delete, Serve)
  */
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     try {
@@ -322,7 +324,7 @@ app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
 app.post("/save-edit", async (req, res) => {
     const isAr = /[\u0600-\u06FF]/.test(req.body.newText);
     await Subtitle.findOneAndUpdate({ fileId: req.body.fileId }, { arabicText: req.body.newText, isAI: !isAr });
-    res.send("<script>alert('تم الحفظ بنجاح!'); window.location.href='/stats';</script>");
+    res.send("<script>alert('تم الحفظ!'); window.location.href='/stats';</script>");
 });
 
 app.get("/delete/:fileId", async (req, res) => { await Subtitle.deleteOne({ fileId: req.params.fileId }); res.redirect('/stats'); });
@@ -334,7 +336,7 @@ app.get("/sub/:fileId.srt", async (req, res) => {
         res.setHeader('Content-Type', 'text/plain; charset=utf-8');
         res.setHeader('Access-Control-Allow-Origin', '*');
         res.send(sub.arabicText);
-    } else res.status(404).send("Subtitle Not Found");
+    } else res.status(404).send("Not found");
 });
 
 app.use("/", getRouter(addonInterface));
