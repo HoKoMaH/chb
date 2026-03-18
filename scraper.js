@@ -3,7 +3,7 @@ const AdmZip = require('adm-zip');
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const { translate } = require('google-translate-api-x');
 
-// إعدادات الوصول لمنع الحظر
+// إعدادات الوصول لمنع الحظر وتحديد الهوية كمتصفح
 const axiosHeader = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/110.0.0.0 Safari/537.36',
     'Accept': 'application/json'
@@ -24,12 +24,13 @@ async function downloadAndUnzip(subUrl) {
         const res = await axios.get(fullUrl, { 
             responseType: 'arraybuffer', 
             headers: axiosHeader,
-            timeout: 20000 
+            timeout: 25000 
         });
         
         const zip = new AdmZip(Buffer.from(res.data));
         const entries = zip.getEntries();
         
+        // البحث عن ملف .srt وتجاهل الملفات غير الضرورية
         const srtEntry = entries.find(e => 
             e.entryName.toLowerCase().endsWith('.srt') && 
             !e.entryName.includes('MACOSX') &&
@@ -38,7 +39,7 @@ async function downloadAndUnzip(subUrl) {
         
         return srtEntry ? srtEntry.getData().toString('utf8') : null;
     } catch (err) {
-        console.error(`[ZIP-ERROR] ❌ فشل التحميل: ${subUrl}`, err.message);
+        console.error(`[ZIP-ERROR] ❌ فشل التحميل لـ: ${subUrl}`, err.message);
         return null;
     }
 }
@@ -100,7 +101,7 @@ async function translateToArabic(sourceSrt, onProgress = null) {
 }
 
 /**
- * 3. المحرك الرئيسي (البحث، الحفظ، العرض)
+ * 3. المحرك الرئيسي (جلب كــل المتوفر وحفظه)
  */
 async function getSmartSubtitles(fullId, SubtitleModel) {
     const API_KEY = process.env.SUBDL_API_KEY;
@@ -112,19 +113,21 @@ async function getSmartSubtitles(fullId, SubtitleModel) {
         let baseUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${API_KEY}`;
         if (season && episode) baseUrl += `&season=${season}&episode=${episode}`;
 
-        // المرحلة 1: جلب وحفظ الترجمات العربية الأصلية
-        console.log(`[SCRAPER] 🔍 جاري سحب الترجمات لـ ${cleanId}...`);
+        // المرحلة 1: جلب وحفظ **كل** الترجمات العربية الأصلية المتوفرة
+        console.log(`[SCRAPER] 🔍 جاري سحب كافه الترجمات العربية لـ ${cleanId}...`);
         const arRes = await axios.get(`${baseUrl}&languages=ar`, { headers: axiosHeader }).catch(() => null);
         
         if (arRes?.data?.status === true && arRes.data.subtitles?.length > 0) {
-            console.log(`[SCRAPER] ✨ وجدنا ${arRes.data.subtitles.length} ملف. جاري المزامنة مع قاعدة البيانات...`);
+            const allSubs = arRes.data.subtitles;
+            console.log(`[SCRAPER] ✨ تم العثور على ${allSubs.length} ملف عربي. جاري المعالجة والمزامنة...`);
             
-            for (let s of arRes.data.subtitles.slice(0, 8)) {
+            // معالجة كل الملفات دون استثناء
+            for (let s of allSubs) {
                 const content = await downloadAndUnzip(s.url);
                 if (content) {
-                    const uniqueFileId = `${cleanId.replace(/:/g,'_')}_org_${s.subs_id || Math.random().toString(36).substr(2, 5)}`;
+                    const uniqueFileId = `${cleanId.replace(/:/g,'_')}_org_${s.subs_id || Math.random().toString(36).substr(2, 6)}`;
                     
-                    // الحفظ أو التحديث لضمان ظهورها في Stats
+                    // استخدام findOneAndUpdate لضمان التحديث أو الإضافة الفورية لقاعدة البيانات
                     const savedSub = await SubtitleModel.findOneAndUpdate(
                         { fileId: uniqueFileId },
                         {
@@ -139,15 +142,19 @@ async function getSmartSubtitles(fullId, SubtitleModel) {
                     results.push(savedSub);
                 }
             }
+            // إذا نجحنا في جلب أي ملف عربي أصلي، نعيد القائمة كاملة فوراً
             if (results.length > 0) return results;
         }
 
-        // المرحلة 2: البحث في المخزن المحلي (إذا لم نجد جديداً من SUBDL)
+        // المرحلة 2: البحث المحلي (في حال فشل الاتصال بـ SUBDL أو عدم وجود جديد)
         const localSubs = await SubtitleModel.find({ imdbId: cleanId });
-        if (localSubs.length > 0) return localSubs;
+        if (localSubs.length > 0) {
+            console.log(`[SCRAPER] 💾 تم العثور على ${localSubs.length} ترجمة مخزنة مسبقاً.`);
+            return localSubs;
+        }
 
-        // المرحلة 3: التعريب الآلي (إذا كان الفيلم جديداً تماماً ولا يوجد له ترجمة عربية)
-        console.log(`[SCRAPER] 🌍 لا يوجد ملف عربي. جاري بدء التعريب الآلي...`);
+        // المرحلة 3: التعريب الآلي (فقط إذا لم يتوفر أي ملف عربي أصلي نهائياً)
+        console.log(`[SCRAPER] 🌍 لا يوجد ملف عربي أصلي. جاري محاولة التعريب الآلي من النسخة الإنجليزية...`);
         const enRes = await axios.get(`${baseUrl}&languages=en`, { headers: axiosHeader }).catch(() => null);
         
         if (enRes?.data?.subtitles?.length > 0) {
