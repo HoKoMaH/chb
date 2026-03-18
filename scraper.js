@@ -1,87 +1,120 @@
 const axios = require('axios');
 const AdmZip = require('adm-zip');
-const { translate } = require('google-translate-api-x');
+const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require("@google/generative-ai");
+
+const API_KEYS = [
+    process.env.GEMINI_KEY_1, process.env.GEMINI_KEY_2, process.env.GEMINI_KEY_3,
+    process.env.GEMINI_KEY_4, process.env.GEMINI_KEY_5, process.env.GEMINI_KEY_6,
+    process.env.GEMINI_KEY_7
+].map(k => k ? k.trim() : null).filter(k => k);
+
+let currentKeyIndex = 0;
+
+function getNextKey() {
+    const key = API_KEYS[currentKeyIndex];
+    currentKeyIndex = (currentKeyIndex + 1) % API_KEYS.length;
+    return key;
+}
 
 /**
- * دالة الترجمة باستخدام محرك Google المجاني
+ * ترجمة سطر واحد مع ضمان العودة السريعة للموقع
  */
-async function translateWithGoogle(textBatch) {
+async function translateSingleLine(text) {
+    if (!text || text.trim() === "" || /^\d+$/.test(text) || text.includes('-->')) return text;
+
+    const cleanText = text.replace(/\{.*?\}/g, '').trim();
+    if (!cleanText) return text;
+
+    const key = getNextKey();
     try {
-        // نرسل المصفوفة كاملة لجوجل، وهو سيعيدها مصفوفة مترجمة بنفس الترتيب
-        const res = await translate(textBatch, { to: 'ar', forceBatch: true });
-        return res.map(item => item.text);
+        const genAI = new GoogleGenerativeAI(key);
+        const model = genAI.getGenerativeModel({ 
+            model: "gemini-1.5-flash",
+            safetySettings: [
+                { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+                { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+            ]
+        });
+
+        // طلب ترجمة فائق السرعة
+        const result = await model.generateContent(cleanText);
+        const translated = (await result.response).text().trim();
+        return translated || text;
     } catch (e) {
-        console.error("Google Translate Error:", e.message);
-        return textBatch; // العودة للأصل عند الخطأ
+        return text; // العودة للأصل فوراً عند أي تأخير أو خطأ
     }
 }
 
+/**
+ * المحرك اللحظي: يحدّث النص ويرجعه للموقع فوراً
+ */
 async function translateToArabic(sourceSrt) {
-    if (!sourceSrt) return "";
+    if (!sourceSrt || API_KEYS.length === 0) return sourceSrt;
 
-    console.log("[GOOGLE-ENGINE] 🚀 بدء الترجمة السريعة عبر محرك جوجل...");
     const lines = sourceSrt.replace(/\r/g, '').split('\n');
-    let textToTranslate = [];
-    let mapIndices = [];
+    let translatedLines = [];
 
-    // تصفية الأسطر (نصوص الحوار فقط)
+    console.log(`[LIVE MODE] 🟢 جاري الترجمة والإرسال المباشر...`);
+
     for (let i = 0; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (line && !line.includes('-->') && !/^\d+$/.test(line)) {
-            textToTranslate.push(line);
-            mapIndices.push(i);
+        let line = lines[i];
+
+        if (line.includes('-->') || /^\d+$/.test(line.trim()) || line.trim() === "") {
+            translatedLines.push(line);
+        } else {
+            // ترجمة وحقن فوري في المصفوفة
+            const translated = await translateSingleLine(line);
+            translatedLines.push(translated);
+            
+            // لإعطاء شعور بالسرعة في الموقع، يمكننا طباعة التقدم في السجلات
+            if (i % 20 === 0) console.log(`[PROGRESS] Translated ${i} lines...`);
         }
     }
 
-    // جوجل سريع جداً، يمكننا إرسال 50 سطر في المرة الواحدة
-    const BATCH_SIZE = 50;
-    let finalResults = [];
-
-    for (let i = 0; i < textToTranslate.length; i += BATCH_SIZE) {
-        const batch = textToTranslate.slice(i, i + BATCH_SIZE);
-        console.log(`[PROGRESS] Translating lines ${i} to ${i + BATCH_SIZE}...`);
-        
-        const translatedBatch = await translateWithGoogle(batch);
-        finalResults.push(...translatedBatch);
-    }
-
-    // إعادة الحشو في ملف الـ SRT
-    for (let i = 0; i < mapIndices.length; i++) {
-        lines[mapIndices[i]] = finalResults[i] || lines[mapIndices[i]];
-    }
-
-    return lines.join('\n');
+    return translatedLines.join('\n');
 }
 
-// دالة fetchAllPossibleSubs تبقى كما هي لكنها ستستخدم المحرك الجديد تلقائياً
-async function fetchAllPossibleSubs(fullId) {
+/**
+ * دالة الجلب الرئيسية
+ */
+async function fetchAllPossibleSubs(fullId, videoFileName) {
     const SUBDL_API_KEY = process.env.SUBDL_API_KEY;
     const [imdbId, season, episode] = fullId.split(':');
+    
     try {
-        let url = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${SUBDL_API_KEY}`;
-        if (season && season !== 'undefined') url += `&season=${season}&episode=${episode}`;
+        let baseUrl = `https://api.subdl.com/api/v1/subtitles?imdb_id=${imdbId}&api_key=${SUBDL_API_KEY}`;
+        if (season && episode) baseUrl += `&season=${season}&episode=${episode}`;
 
-        const res = await axios.get(url);
-        const sub = res.data.subtitles?.find(s => s.lang === 'english') || res.data.subtitles?.[0];
-        
-        if (!sub) return [];
-
-        const content = await downloadAndUnzip(sub.url);
-        if (content) {
-            const translatedContent = await translateToArabic(content);
-            return [{
-                content: translatedContent,
-                releaseName: sub.release_name,
-                source: "Google Translated (Fast)"
-            }];
+        // محاولة جلب العربية أولاً (لتظهر فوراً للمستخدم)
+        const arRes = await axios.get(`${baseUrl}&languages=ar`).catch(() => null);
+        if (arRes?.data?.subtitles?.length > 0) {
+            const s = arRes.data.subtitles[0];
+            const content = await downloadAndUnzip(s.url);
+            if (content) return [{ content, releaseName: s.release_name, source: "Original Arabic" }];
         }
-    } catch (e) { console.error("Fetcher Error:", e.message); }
+
+        // إذا لم تتوفر، نبدأ بالتعريب اللحظي
+        const allRes = await axios.get(baseUrl).catch(() => null);
+        if (allRes?.data?.subtitles?.length > 0) {
+            const s = allRes.data.subtitles[0]; 
+            const content = await downloadAndUnzip(s.url);
+            if (content) {
+                // هنا تبدأ العملية: بمجرد انتهاء translateToArabic، سيرجع الملف كاملاً للموقع
+                const translated = await translateToArabic(content);
+                return [{ content: translated, releaseName: s.release_name, source: `AI Translated` }];
+            }
+        }
+    } catch (e) {
+        console.error(`[ERROR]: ${e.message}`);
+    }
     return [];
 }
 
 async function downloadAndUnzip(subUrl) {
     try {
-        const res = await axios.get(`https://dl.subdl.com${subUrl}`, { responseType: 'arraybuffer' });
+        const res = await axios.get(`https://dl.subdl.com${subUrl}`, { responseType: 'arraybuffer', timeout: 15000 });
         const zip = new AdmZip(Buffer.from(res.data));
         const srtEntry = zip.getEntries().find(e => e.entryName.toLowerCase().endsWith('.srt') && !e.entryName.startsWith('__MACOSX'));
         return srtEntry ? srtEntry.getData().toString('utf8') : null;
