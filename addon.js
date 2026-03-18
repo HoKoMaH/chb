@@ -2,19 +2,21 @@ const { addonBuilder } = require("stremio-addon-sdk");
 const mongoose = require('mongoose');
 const { getSmartSubtitles } = require("./scraper");
 
+// إعداد مانيفست الإضافة مع إضافة الحقول الإجبارية لتجنب خطأ الـ Linter
 const manifest = {
     id: "community.ar_sa.addon",
     version: "1.3.0",
     name: "AR.SA AI Subtitles",
-    description: "قائمة ترجمة خاصة وحصرية باستخدام الذكاء الاصطناعي",
+    description: "ترجمات عربية حصرية باستخدام الذكاء الاصطناعي 🇸🇦",
     resources: ["subtitles"],
     types: ["movie", "series"],
-    idPrefixes: ["tt"]
+    idPrefixes: ["tt"],
+    catalogs: [] // هذا السطر هو حل المشكلة التي ظهرت في الـ Log
 };
 
 const builder = new addonBuilder(manifest);
 
-// تعريف الموديل (لضمان عمل الهاندلر)
+// تعريف الموديل لضمان عدم حدوث خطأ عند استدعاء قاعدة البيانات
 const SubtitleSchema = new mongoose.Schema({
     fileId: { type: String, unique: true },
     imdbId: String,
@@ -29,6 +31,7 @@ builder.defineSubtitlesHandler(async (args) => {
     const { id } = args;
 
     try {
+        // البحث والتعريب الذكي
         const results = await getSmartSubtitles(id, Subtitle);
 
         if (!results || results.length === 0) return { subtitles: [] };
@@ -39,12 +42,8 @@ builder.defineSubtitlesHandler(async (args) => {
             return {
                 id: `arsa_${fileId}`,
                 url: `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/sub/${fileId}.srt`,
-                /** * التعديل هنا: 
-                 * باستخدام 'ar-SA' أو 'Arabic (AR-SA)'، سيقوم ستريميو بإظهارها 
-                 * كخيار منفصل تماماً عن خيار 'Arabic' التقليدي.
-                 */
+                // استخدام كود لغة مخصص ليظهر بشكل منفصل في القائمة
                 lang: "ar-SA", 
-                // الوسم الذي سيظهر بجانب العلم أو رمز اللغة
                 label: `🇸🇦 ${sub.label} ${sub.isAI ? '[AI]' : '[OFFICIAL]'}`
             };
         });
