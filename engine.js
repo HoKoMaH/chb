@@ -13,34 +13,35 @@ const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', Subtitle
 
 async function getSyncedSubtitles(fullId, videoFileName) {
     let results = [];
-    console.log(`[ENGINE] 📥 طلب جديد لـ: ${fullId}`);
 
     try {
-        // 1. الأولوية القصوى: جلب كل ما رفعتَه أنت يدوياً لهذا الـ ID
+        // المرحلة 1: البحث في قاعدة البيانات المحلية أولاً (سرعة فائقة)
         const localSubs = await Subtitle.find({ imdbId: fullId }).sort({ createdAt: -1 });
-        localSubs.forEach(sub => {
-            results.push({
+        
+        if (localSubs.length > 0) {
+            console.log(`[ENGINE] ✅ إرسال ${localSubs.length} ترجمة من القاعدة المحلية.`);
+            return localSubs.map(sub => ({
                 fileId: sub.fileId,
                 label: sub.label,
-                isAI: sub.isAI,
-                source: "Local"
-            });
-        });
+                isAI: sub.isAI
+            }));
+        }
 
-        // 2. البحث الخارجي (SubDL): يجلب العربي الأصلي أولاً، وإذا لم يجد يعرب نسخة متوافقة
-        console.log(`[ENGINE] 🔍 جاري فحص المصادر الخارجية لـ ${fullId}...`);
+        // المرحلة 2: إذا كانت القاعدة فارغة، نذهب للجلب الخارجي
+        console.log(`[ENGINE] 🔍 جاري سحب الترجمات من المصادر الخارجية لـ ${fullId}...`);
         const externalSubs = await scraper.fetchAllPossibleSubs(fullId, videoFileName);
         
+        if (!externalSubs || externalSubs.length === 0) return [];
+
+        // معالجة وحفظ كل الملفات المجلوبة
         for (let sub of externalSubs) {
-            // توليد معرف فريد للملف الخارجي
-            const newFileId = `${fullId.replace(/:/g, '_')}_ext_${Date.now()}_${Math.floor(Math.random() * 100)}`;
+            const newFileId = `${fullId.replace(/:/g, '_')}_${sub.source}_${Date.now()}_${Math.floor(Math.random() * 100)}`;
             
-            // حفظ في القاعدة لسرعة الاستجابة مستقبلاً
             const savedSub = new Subtitle({
                 fileId: newFileId,
                 imdbId: fullId,
                 arabicText: sub.content,
-                label: sub.releaseName || "External Source",
+                label: sub.releaseName || "Source",
                 isAI: sub.source === "AI"
             });
 
@@ -48,18 +49,17 @@ async function getSyncedSubtitles(fullId, videoFileName) {
             
             results.push({
                 fileId: savedSub.fileId,
-                label: (sub.source === "AI" ? "🤖 AI | " : "🇸🇦 ") + savedSub.label,
-                isAI: savedSub.isAI,
-                source: "External"
+                label: savedSub.label,
+                isAI: savedSub.isAI
             });
         }
 
+        return results;
+
     } catch (e) {
         console.error(`[ENGINE-ERROR] ❌ فشل المحرك: ${e.message}`);
+        return [];
     }
-
-    console.log(`[ENGINE] ✅ إجمالي الترجمات المجهزة: ${results.length}`);
-    return results;
 }
 
 module.exports = { getSyncedSubtitles };
