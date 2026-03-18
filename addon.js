@@ -2,10 +2,10 @@ const { addonBuilder } = require("stremio-addon-sdk");
 const engine = require("./engine");
 
 const manifest = {
-    id: "community.ar.sa.pro.ultimate", // تغيير الـ ID لكسر الكاش تماماً
-    version: "8.3.0",
+    id: "community.ar.sa.pro.independent", // معرف فريد لضمان تحديث الإضافة في ستريميو
+    version: "8.5.0",
     name: "AR.SA Ultimate",
-    description: "محرك الترجمة العربية الاحترافي",
+    description: "محرك الترجمة العربية المستقل والتعريب الآلي",
     resources: ["subtitles"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
@@ -17,23 +17,40 @@ const builder = new addonBuilder(manifest);
 builder.defineSubtitlesHandler(async (args) => {
     const { id, extra } = args;
     const videoFileName = extra.filename || "";
+    const domain = process.env.RENDER_EXTERNAL_HOSTNAME || "chb-gy3n.onrender.com";
+
+    console.log(`[STREMIO] 📥 طلب جديد لـ: ${id}`);
 
     try {
-        const subs = await engine.getSyncedSubtitles(id, videoFileName);
+        // جلب الترجمات من المحرك (سواء محلية أو خارجية)
+        const subtitlesList = await engine.getSyncedSubtitles(id, videoFileName);
         
-        if (!subs || subs.length === 0) return { subtitles: [] };
+        if (!subtitlesList || subtitlesList.length === 0) {
+            return { subtitles: [] };
+        }
 
-        const formattedSubs = subs.map(sub => ({
-            id: sub.fileId,
-            url: `https://chb-gy3n.onrender.com/sub/${sub.fileId}.srt`,
-            // السر هنا: نضع اسم اللغة "AR.SA" بدلاً من "Arabic" لتظهر يساراً بشكل منفصل
-            lang: "AR.SA 🇸🇦", 
-            name: sub.label // اسم النسخة (BluRay, YTS, إلخ)
-        }));
+        // تحويل البيانات لتنسيق ستريميو الذي يظهر في القائمة اليسرى
+        const formattedSubtitles = subtitlesList.map(sub => {
+            // منطق تحديد النجمة (إذا كانت الترجمة متوافقة تماماً مع اسم الملف)
+            const isMatch = videoFileName && sub.label && 
+                           sub.label.split(' ').some(word => videoFileName.includes(word));
 
-        console.log(`[STREMIO] ✅ تم إرسال ${formattedSubs.length} ترجمة تحت قائمة AR.SA`);
-        return { subtitles: formattedSubs };
+            return {
+                id: sub.fileId,
+                // السر هنا: نضع اسم اللغة "AR.SA 🇸🇦" لتظهر في القائمة اليسرى بشكل منفصل
+                lang: "ar-sa", 
+                // الرابط المباشر للملف من سيرفرك
+                url: `https://${domain}/sub/${sub.fileId}.srt`,
+                // ما يظهر في القائمة اليمنى (Variants)
+                name: isMatch ? `⭐ ${sub.label}` : `🇸🇦 ${sub.label}`
+            };
+        });
+
+        console.log(`[STREMIO] ✅ تم إرسال ${formattedSubtitles.length} ترجمة تحت قسم AR.SA`);
+        return { subtitles: formattedSubtitles };
+
     } catch (e) {
+        console.error(`[STREMIO-ERROR] ❌ فشل في معالجة الطلب: ${e.message}`);
         return { subtitles: [] };
     }
 });
