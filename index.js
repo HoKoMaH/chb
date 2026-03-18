@@ -190,7 +190,7 @@ app.get("/stats", async (req, res) => {
                                 <input type="number" name="season" placeholder="موسم" style="width:50%">
                                 <input type="number" name="episode" placeholder="حلقة" style="width:50%">
                             </div>
-                            <input name="label" id="manual_label" placeholder="اسم النسخة" required title="يتم تعبئته تلقائياً عند اختيار ملف">
+                            <input name="label" id="manual_label" placeholder="اسم النسخة" required>
                             <input type="file" id="subFile" name="subtitleFile" accept=".srt" required onchange="updateLabel(this)">
                             <button type="submit" style="background:#27ae60; color:white; font-weight:bold;">حفظ في السيرفر</button>
                         </form>
@@ -205,7 +205,6 @@ app.get("/stats", async (req, res) => {
                 let timer;
                 function toggleFields(){ document.getElementById('sFields').style.display = document.getElementById('type').value==='series'?'flex':'none'; }
                 
-                // ميزة استخراج اسم الملف ووضعه في اسم النسخة
                 function updateLabel(input) {
                     if (input.files && input.files[0]) {
                         const fileName = input.files[0].name.replace('.srt', '');
@@ -223,19 +222,17 @@ app.get("/stats", async (req, res) => {
                         const res = await fetch('/search-id?q=' + q);
                         const data = await res.json();
                         document.getElementById('r').innerHTML = data.slice(0,8).map(i => {
-                            return \`<div class="search-item" onclick="copyToUpload('\${i.id}', '\${i.l}', \${i.q === 'TV series'}, event)"><b>\${i.l} (\${i.y || ''})</b> - <code>\${i.id}</code></div>\`;
+                            return \`<div class="search-item" onclick="copyToUpload('\${i.id}', \${i.q === 'TV series'}, event)"><b>\${i.l} (\${i.y || ''})</b> - <code>\${i.id}</code></div>\`;
                         }).join('');
                     }, 500);
                 }
 
-                function copyToUpload(id, title, isSeries, event) {
+                function copyToUpload(id, isSeries, event) {
+                    // ملء الـ ID والنوع فقط (تم حذف العنوان من هنا بناءً على طلبك)
                     document.getElementById('manual_id').value = id;
-                    // لا نغير الـ label هنا إذا كان المستخدم قد اختار ملفاً بالفعل
-                    if(!document.getElementById('manual_label').value) {
-                         document.getElementById('manual_label').value = title;
-                    }
                     document.getElementById('type').value = isSeries ? 'series' : 'movie';
                     toggleFields();
+                    
                     navigator.clipboard.writeText(id);
                     const items = document.querySelectorAll('.search-item');
                     items.forEach(el => el.style.background = 'white');
