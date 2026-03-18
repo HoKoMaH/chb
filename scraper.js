@@ -16,9 +16,19 @@ function getNextKey() {
     return key;
 }
 
+/**
+ * دالة تنظيف النص من أكواد SRT الخاصة مثل {\an8} لضمان عدم إرباك الذكاء الاصطناعي
+ */
+function cleanSrtTags(text) {
+    return text.replace(/\{.*?\}/g, '').trim();
+}
+
 async function translateBatch(batchTexts, batchIndices, translatedLines) {
     let success = false;
     let attempts = 0;
+
+    // تنظيف النصوص قبل إرسالها (نحتفظ بنسخة من الأكواد لإعادتها إذا لزم الأمر، أو نترجم النص النظيف فقط)
+    const cleanedTexts = batchTexts.map(t => cleanSrtTags(t));
 
     while (!success && attempts < 2) {
         const key = getNextKey();
@@ -34,35 +44,34 @@ async function translateBatch(batchTexts, batchIndices, translatedLines) {
                 ]
             });
 
-            // طلب الترجمة مع تأكيد صارم على التنسيق المرقوم
-            const prompt = `Translate to Arabic. Keep cinematic style. Return ONLY the format "Index: TranslatedText".\n\n` + 
-                           batchTexts.map((t, idx) => `${idx + 1}: ${t}`).join('\n');
+            // طلب ترجمة مبسط جداً مع علامة فصل فريدة (---) بدلاً من الترقيم
+            const prompt = `Translate these movie subtitle lines to Arabic. Keep the same order. Separated by '---'. No extra text:\n\n` + 
+                           cleanedTexts.join('\n---\n');
 
             const result = await model.generateContent(prompt);
             const text = (await result.response).text().trim();
 
             if (text) {
-                const lines = text.split('\n');
-                lines.forEach(line => {
-                    // Regex محسن لاستخراج الرقم حتى لو وجد مسافات أو رموز
-                    const match = line.match(/^(\d+)\s*[:.-]\s*(.*)/);
-                    if (match) {
-                        const localIdx = parseInt(match[1]) - 1;
-                        const translatedText = match[2].trim();
-                        if (localIdx >= 0 && localIdx < batchIndices.length && translatedText) {
-                            translatedLines[batchIndices[localIdx]] = translatedText;
-                        }
+                // تقسيم الاستجابة بناءً على الفاصل
+                const parts = text.split('---').map(p => p.trim());
+                
+                for (let j = 0; j < batchIndices.length; j++) {
+                    // إذا نجحت الترجمة نضعها، وإذا كانت فارغة نضع النص الأصلي (لضمان عدم اختفاء السطر)
+                    if (parts[j] && parts[j].length > 0) {
+                        translatedLines[batchIndices[j]] = parts[j];
+                    } else {
+                        translatedLines[batchIndices[j]] = batchTexts[j]; 
                     }
-                });
+                }
                 success = true;
             }
         } catch (e) {
             attempts++;
-            await new Promise(r => setTimeout(r, 1200));
+            await new Promise(r => setTimeout(r, 1500));
         }
     }
 
-    // ضمان عدم وجود سطر فارغ نهائياً
+    // تأمين أخير لضمان عدم وجود فراغ
     batchIndices.forEach((globalIdx, localIdx) => {
         if (!translatedLines[globalIdx] || translatedLines[globalIdx].trim() === "") {
             translatedLines[globalIdx] = batchTexts[localIdx];
@@ -73,12 +82,11 @@ async function translateBatch(batchTexts, batchIndices, translatedLines) {
 async function translateToArabic(sourceSrt, onProgress) {
     if (!sourceSrt || API_KEYS.length === 0) return sourceSrt;
 
-    // تنظيف الملف من الرموز الغريبة التي قد تربك التقسيم
     const lines = sourceSrt.replace(/\r/g, '').split('\n');
     let translatedLines = [...lines]; 
 
     let allBatches = [];
-    const BATCH_SIZE = 20; // تقليل الحجم لضمان الدقة المطلقة
+    const BATCH_SIZE = 15; // تقليل الحجم لأقصى دقة ممكنة
     const PARALLEL_LIMIT = 2;
 
     let currentBatchTexts = [];
@@ -87,7 +95,7 @@ async function translateToArabic(sourceSrt, onProgress) {
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i].trim();
         
-        // تحسين الفلترة: تجاهل التوقيت، الأرقام التسلسلية، والأسطر الفارغة
+        // فحص صارم جداً للسطر: هل هو حوار حقيقي؟
         const isTimestamp = line.includes('-->');
         const isNumber = /^\d+$/.test(line);
         const isEmpty = line === "";
@@ -104,17 +112,19 @@ async function translateToArabic(sourceSrt, onProgress) {
         }
     }
 
+    console.log(`[STABILITY MODE] 🛠️ ترجمة ${allBatches.length} دفعة بنظام التحقق الثنائي...`);
+
     for (let i = 0; i < allBatches.length; i += PARALLEL_LIMIT) {
         const group = allBatches.slice(i, i + PARALLEL_LIMIT);
         await Promise.all(group.map(batch => translateBatch(batch.texts, batch.indices, translatedLines)));
         if (onProgress) onProgress(Math.floor((i / allBatches.length) * 100));
-        await new Promise(r => setTimeout(r, 1000));
+        await new Promise(r => setTimeout(r, 1200));
     }
 
     return translatedLines.join('\n');
 }
 
-// الدوال الأخرى تبقى كما هي مع تحسين بسيط في downloadAndUnzip
+// الدوال fetchAllPossibleSubs و downloadAndUnzip تبقى كما هي
 async function fetchAllPossibleSubs(fullId, videoFileName) {
     const SUBDL_API_KEY = process.env.SUBDL_API_KEY;
     const [imdbId, season, episode] = fullId.split(':');
@@ -146,7 +156,6 @@ async function downloadAndUnzip(subUrl) {
     try {
         const res = await axios.get(`https://dl.subdl.com${subUrl}`, { responseType: 'arraybuffer', timeout: 15000 });
         const zip = new AdmZip(Buffer.from(res.data));
-        // البحث عن ملف srt وتجاهل ملفات النص الأخرى
         const srtEntry = zip.getEntries().find(e => e.entryName.toLowerCase().endsWith('.srt') && !e.entryName.startsWith('__MACOSX'));
         return srtEntry ? srtEntry.getData().toString('utf8') : null;
     } catch (err) { return null; }
