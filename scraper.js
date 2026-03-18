@@ -16,9 +16,6 @@ function getNextKey() {
     return key;
 }
 
-/**
- * دالة ذكية لترجمة الدفعة مع التحقق من سلامة الأسطر
- */
 async function translateBatch(batchTexts, batchIndices, translatedLines) {
     let success = false;
     let attempts = 0;
@@ -37,71 +34,58 @@ async function translateBatch(batchTexts, batchIndices, translatedLines) {
                 ]
             });
 
-            // Prompt صارم جداً لمنع Gemini من التأليف أو دمج الأسطر
-            const prompt = `Act as a professional movie translator. Translate the following lines to Arabic. 
-            Rules: 
-            - Keep the exact same number of lines.
-            - Do not add any notes, numbers, or explanations.
-            - Return ONLY the translated text.
-            
-            Lines:
-            ${batchTexts.join('\n')}`;
+            // نطلب من Gemini ترقيم الأسطر لكي نعرف مكان كل ترجمة بدقة
+            const prompt = `Translate these lines to Arabic. Return them in this format: "1: [translation]". No intro or outro.\n\n` + 
+                           batchTexts.map((t, idx) => `${idx + 1}: ${t}`).join('\n');
 
             const result = await model.generateContent(prompt);
             const response = await result.response;
             const text = response.text().trim();
 
             if (text) {
-                // تقسيم النص مع تنظيف الأسطر الفارغة الناتجة عن الخطأ
-                let parts = text.split('\n').map(p => p.trim()).filter(p => p.length > 0);
-
-                // إذا كان عدد الأسطر المترجمة مطابقاً أو قريباً، نقوم بالحقن
-                if (parts.length >= batchTexts.length * 0.8) {
-                    for (let j = 0; j < batchIndices.length; j++) {
-                        translatedLines[batchIndices[j]] = parts[j] || batchTexts[j];
+                const lines = text.split('\n');
+                lines.forEach(line => {
+                    // استخراج الرقم والنص المترجم (مثال: "1: النص المترجم")
+                    const match = line.match(/^(\d+):\s*(.*)/);
+                    if (match) {
+                        const localIdx = parseInt(match[1]) - 1;
+                        const translatedText = match[2].trim();
+                        if (localIdx >= 0 && localIdx < batchIndices.length && translatedText) {
+                            translatedLines[batchIndices[localIdx]] = translatedText;
+                        }
                     }
-                    success = true;
-                } else {
-                    console.log(`[Mismatch] Batch size mismatch. Expected ${batchTexts.length}, got ${parts.length}. Retrying...`);
-                    attempts++;
-                }
+                });
+                success = true;
             }
         } catch (e) {
             attempts++;
-            console.error(`[Key Error] ${e.message.substring(0, 50)}`);
             await new Promise(r => setTimeout(r, 1000));
         }
     }
 
-    // Fallback: إذا فشل كل شيء، نضع النص الأصلي لكي لا يظهر الملف فارغاً
-    if (!success) {
-        batchIndices.forEach((idx, i) => {
-            if (!translatedLines[idx] || translatedLines[idx] === "") {
-                translatedLines[idx] = batchTexts[i];
-            }
-        });
-    }
+    // تأمين أخير: أي سطر بقي فارغاً بعد المحاولات يتم ملؤه بالنص الأصلي
+    batchIndices.forEach((globalIdx, localIdx) => {
+        if (!translatedLines[globalIdx] || translatedLines[globalIdx].trim() === "") {
+            translatedLines[globalIdx] = batchTexts[localIdx];
+        }
+    });
 }
 
-/**
- * المحرك الرئيسي مع تقليل الضغط لضمان الجودة
- */
 async function translateToArabic(sourceSrt, onProgress) {
     if (!sourceSrt || API_KEYS.length === 0) return sourceSrt;
 
     const lines = sourceSrt.replace(/\r/g, '').split('\n');
-    let translatedLines = [...lines]; // تهيئة كاملة بالقيم الأصلية
+    let translatedLines = [...lines]; // تهيئة الملف بالكامل بالنص الأصلي كاحتياط
 
     let allBatches = [];
-    const BATCH_SIZE = 30; // تقليل الحجم لزيادة الدقة ومنع دمج الأسطر
-    const PARALLEL_LIMIT = 2; // تقليل التوازي لمنع اختناق الـ API
+    const BATCH_SIZE = 25; // حجم أصغر لضمان دقة الترقيم
+    const PARALLEL_LIMIT = 2;
 
     let currentBatchTexts = [];
     let currentBatchIndices = [];
 
     for (let i = 0; i < lines.length; i++) {
         let line = lines[i].trim();
-        // التفرقة الدقيقة بين الحوار والبيانات الوصفية
         if (line && !line.includes('-->') && isNaN(line)) {
             currentBatchTexts.push(line);
             currentBatchIndices.push(i);
@@ -114,21 +98,16 @@ async function translateToArabic(sourceSrt, onProgress) {
         }
     }
 
-    console.log(`[REPAIR MODE] 🛠️ ترجمة ${allBatches.length} دفعة بحذر...`);
-
     for (let i = 0; i < allBatches.length; i += PARALLEL_LIMIT) {
         const group = allBatches.slice(i, i + PARALLEL_LIMIT);
         await Promise.all(group.map(batch => translateBatch(batch.texts, batch.indices, translatedLines)));
-        
         if (onProgress) onProgress(Math.floor((i / allBatches.length) * 100));
-        // انتظار كافٍ لضمان استقرار الاستجابة
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, 600));
     }
 
     return translatedLines.join('\n');
 }
 
-// باقي الدوال (fetchAllPossibleSubs, downloadAndUnzip) تبقى كما هي
 async function fetchAllPossibleSubs(fullId, videoFileName) {
     const SUBDL_API_KEY = process.env.SUBDL_API_KEY;
     const [imdbId, season, episode] = fullId.split(':');
