@@ -162,6 +162,8 @@ app.get("/stats", async (req, res) => {
             .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
             .search-item { padding: 8px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: 0.2s; }
             .search-item:hover { background: #e8f4fd; }
+            .danger-btn { background:#c0392b; color:white; border:none; padding:10px; border-radius:8px; cursor:pointer; font-weight:bold; transition:0.3s; }
+            .danger-btn:hover { background:#e74c3c; }
         </style></head>
         <body>
             <div style="max-width: 900px; margin: auto; text-align:center;">
@@ -196,10 +198,16 @@ app.get("/stats", async (req, res) => {
                         </form>
                     </div>
                 </div>
-                <div class="card"><table style="width:100%; border-collapse:collapse; text-align:right;">
-                    <thead style="background:#f8f9fa;"><tr><th style="padding:10px;">المحتوى</th><th style="text-align:center;">المصدر</th><th style="text-align:center;">الإجراء</th></tr></thead>
-                    <tbody>${rows}</tbody>
-                </table></div>
+                <div class="card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; padding:0 10px;">
+                        <h3 style="margin:0;">📁 الترجمات الأخيرة</h3>
+                        <button onclick="deleteAllSubtitles()" class="danger-btn">حذف كل الترجمات ⚠️</button>
+                    </div>
+                    <table style="width:100%; border-collapse:collapse; text-align:right;">
+                        <thead style="background:#f8f9fa;"><tr><th style="padding:10px;">المحتوى</th><th style="text-align:center;">المصدر</th><th style="text-align:center;">الإجراء</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                </div>
             </div>
             <script>
                 let timer;
@@ -228,15 +236,23 @@ app.get("/stats", async (req, res) => {
                 }
 
                 function copyToUpload(id, isSeries, event) {
-                    // ملء الـ ID والنوع فقط (تم حذف العنوان من هنا بناءً على طلبك)
                     document.getElementById('manual_id').value = id;
                     document.getElementById('type').value = isSeries ? 'series' : 'movie';
                     toggleFields();
-                    
                     navigator.clipboard.writeText(id);
                     const items = document.querySelectorAll('.search-item');
                     items.forEach(el => el.style.background = 'white');
                     event.currentTarget.style.background = '#e8f4fd';
+                }
+
+                async function deleteAllSubtitles() {
+                    const confirm1 = confirm("⚠️ تنبيه: هل أنت متأكد من رغبتك في حذف جميع الترجمات من قاعدة البيانات؟ لا يمكن التراجع عن هذا الإجراء.");
+                    if(confirm1) {
+                        const confirm2 = confirm("❗ هل أنت متأكد تماماً؟ سيتم مسح كل شيء!");
+                        if(confirm2) {
+                            window.location.href = '/delete-all-now';
+                        }
+                    }
                 }
             </script>
         </body></html>`);
@@ -246,6 +262,18 @@ app.get("/stats", async (req, res) => {
 /**
  * 8. المسارات الخلفية
  */
+
+// مسار الحذف الشامل
+app.get("/delete-all-now", async (req, res) => {
+    try {
+        await Subtitle.deleteMany({});
+        console.log("⚠️ [DATABASE] All subtitles have been deleted.");
+        res.send("<script>alert('تم حذف جميع الترجمات بنجاح!'); window.location.href='/stats';</script>");
+    } catch (e) {
+        res.status(500).send("خطأ أثناء الحذف: " + e.message);
+    }
+});
+
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     try {
         let { imdbId, type, season, episode, label } = req.body;
