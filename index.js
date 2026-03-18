@@ -2,30 +2,19 @@ const express = require('express');
 const { getRouter } = require("stremio-addon-sdk");
 const addonInterface = require("./addon");
 const mongoose = require('mongoose');
+const multer = require('multer');
+const axios = require('axios'); // لإضافة محرك بحث IMDb
+const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-/**
- * 1. لاقط الطلبات (Network Logger)
- */
-app.use((req, res, next) => {
-    if (!req.url.includes('favicon')) {
-        console.log(`\n[NETWORK] 📡 ${new Date().toLocaleString('ar-SA')}`);
-        console.log(`   - النوع: ${req.method} | المسار: ${req.url}`);
-    }
-    next();
-});
-
-/**
- * 2. الاتصال بقاعدة البيانات
- */
+// --- إعدادات قاعدة البيانات ---
 mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log("✅ [DATABASE] Connected"))
-    .catch(err => console.error("❌ [DATABASE] Error:", err));
+    .then(() => console.log("✅ Database Connected"))
+    .catch(err => console.error("❌ DB Error:", err));
 
-/**
- * 3. تعريف الموديل (Subtitle Schema)
- */
 const SubtitleSchema = new mongoose.Schema({
     fileId: { type: String, unique: true },
     imdbId: String,
@@ -37,131 +26,147 @@ const SubtitleSchema = new mongoose.Schema({
 const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
 
 /**
- * 4. مسار الحذف (Delete Route)
- * هذا المسار سيسمح لك بمسح أي ترجمة إنجليزية لإجبار السيرفر على إعادة المحاولة
+ * 1. محرك بحث IMDb سريع
+ * لاستخراج المعرف بسهولة من اسم الفيلم
  */
-app.get("/delete/:fileId", async (req, res) => {
+app.get("/search-id", async (req, res) => {
+    const query = req.query.q;
+    if (!query) return res.json([]);
     try {
-        const fileId = req.params.fileId;
-        await Subtitle.deleteOne({ fileId: fileId });
-        console.log(`[DELETE] 🗑️ تم حذف الملف من القاعدة: ${fileId}`);
-        
-        // إعادة توجيه المستخدم لصفحة الإحصائيات مع رسالة تنبيه
-        res.send(`
-            <script>
-                alert('تم حذف الملف بنجاح! الآن عند تشغيل الحلقة في Stremio سيقوم السيرفر بترجمتها من جديد.');
-                window.location.href = '/stats';
-            </script>
-        `);
-    } catch (e) {
-        res.status(500).send("خطأ أثناء الحذف: " + e.message);
-    }
+        const response = await axios.get(`https://v3.sg.media-imdb.com/suggestion/x/${encodeURIComponent(query)}.json`);
+        const results = response.data.d.map(item => ({
+            id: item.id,
+            title: item.l,
+            year: item.y,
+            type: item.q // 'feature' للفيلم أو 'TV series' للمسلسل
+        }));
+        res.json(results);
+    } catch (e) { res.status(500).json([]); }
 });
 
 /**
- * 5. مسار جلب ملف الـ SRT
+ * 2. مسار التعديل المباشر (Edit)
  */
-app.get("/sub/:fileId.srt", async (req, res) => {
-    try {
-        const fileId = req.params.fileId.replace('.srt', '');
-        const sub = await Subtitle.findOne({ fileId });
-        if (sub && sub.arabicText) {
-            res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-            res.setHeader('Access-Control-Allow-Origin', '*');
-            res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(sub.label)}.srt"`);
-            return res.send(sub.arabicText);
-        }
-        res.status(404).send("File not found.");
-    } catch (e) { res.status(500).send(e.message); }
+app.get("/edit/:fileId", async (req, res) => {
+    const sub = await Subtitle.findOne({ fileId: req.params.fileId });
+    if (!sub) return res.send("الملف غير موجود");
+    
+    res.send(`
+        <html dir="rtl"><body style="font-family:sans-serif; padding:20px; background:#f4f7f6;">
+            <h2>تعديل ملف: ${sub.label}</h2>
+            <form action="/save-edit" method="POST">
+                <input type="hidden" name="fileId" value="${sub.fileId}">
+                <textarea name="newText" style="width:100%; height:70vh; padding:15px; border-radius:10px;">${sub.arabicText}</textarea>
+                <button type="submit" style="background:#27ae60; color:white; padding:15px 30px; border:none; border-radius:10px; cursor:pointer; margin-top:10px;">حفظ التعديلات ✅</button>
+                <a href="/stats" style="margin-right:15px; color:#666;">إلغاء</a>
+            </form>
+        </body></html>
+    `);
+});
+
+app.post("/save-edit", async (req, res) => {
+    const { fileId, newText } = req.body;
+    await Subtitle.findOneAndUpdate({ fileId }, { arabicText: newText });
+    res.send("<script>alert('تم الحفظ بنجاح!'); window.location.href='/stats';</script>");
 });
 
 /**
- * 6. لوحة التحكم المطورة (مع زر الحذف والتحميل)
+ * 3. مسار الرفع اليدوي
+ */
+app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
+    const { imdbId, label } = req.body;
+    const file = req.file;
+    if (!imdbId || !file) return res.status(400).send("بيانات ناقصة");
+
+    const fileId = `${imdbId.replace(/:/g, '_')}_manual_${Date.now()}`;
+    await Subtitle.findOneAndUpdate({ fileId }, {
+        imdbId: imdbId.trim(),
+        arabicText: file.buffer.toString('utf8'),
+        label: label || file.originalname,
+        isAI: false
+    }, { upsert: true });
+    res.redirect('/stats');
+});
+
+/**
+ * 4. صفحة الإحصائيات (الواجهة الجديدة)
  */
 app.get("/stats", async (req, res) => {
-    try {
-        const totalSubs = await Subtitle.countDocuments();
-        const aiSubs = await Subtitle.countDocuments({ isAI: true });
-        const latestSubs = await Subtitle.find().sort({ createdAt: -1 }).limit(40);
-        
-        const manifestUrl = "chb-gy3n.onrender.com/manifest.json";
-        const installUrl = `stremio://${manifestUrl}`;
+    const total = await Subtitle.countDocuments();
+    const subs = await Subtitle.find().sort({ createdAt: -1 }).limit(30);
+    
+    let rows = subs.map(s => `
+        <tr style="border-bottom:1px solid #eee;">
+            <td style="padding:10px;">${s.label}</td>
+            <td style="padding:10px; text-align:center;">
+                <a href="/edit/${s.fileId}" style="color:#2980b9; text-decoration:none; margin-left:10px;">تعديل 📝</a>
+                <a href="/delete/${s.fileId}" style="color:#e74c3c; text-decoration:none;">حذف 🗑️</a>
+            </td>
+        </tr>`).join('');
 
-        let rows = latestSubs.map(sub => `
-            <tr style="border-bottom: 1px solid #eee;">
-                <td style="padding: 12px; font-weight: 500; font-size: 13px;">${sub.label}</td>
-                <td style="padding: 12px; text-align: center;">
-                    <span style="padding: 3px 8px; border-radius: 15px; font-size: 10px; background: ${sub.isAI ? '#e8f5e9; color: #2e7d32;' : '#fff8e1; color: #f57f17;'}">
-                        ${sub.isAI ? '🤖 AI' : '🇸🇦 أصلية'}
-                    </span>
-                </td>
-                <td style="padding: 12px; text-align: center;">
-                    <a href="/sub/${sub.fileId}.srt" style="text-decoration: none; background: #3498db; color: white; padding: 4px 10px; border-radius: 5px; font-size: 10px;">تحميل ↓</a>
-                    
-                    <a href="/delete/${sub.fileId}" onclick="return confirm('هل أنت متأكد من حذف هذه الترجمة؟ سيتم إعادة ترجمتها عند الطلب القادم.')" 
-                       style="text-decoration: none; background: #e74c3c; color: white; padding: 4px 10px; border-radius: 5px; font-size: 10px; margin-right: 5px;">حذف 🗑️</a>
-                </td>
-            </tr>
-        `).join('');
-
-        const html = `
-        <!DOCTYPE html>
-        <html dir="rtl">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>AR.SA Dashboard</title>
-            <style>
-                body { font-family: 'Segoe UI', sans-serif; background: #f4f7f6; margin: 0; padding: 20px; }
-                .container { max-width: 850px; margin: auto; }
-                .install-btn { display: inline-block; background: #8e44ad; color: white; padding: 10px 25px; border-radius: 50px; text-decoration: none; font-weight: bold; margin-bottom: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-                .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 25px; }
-                .card { background: white; padding: 15px; border-radius: 12px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); text-align: center; }
-                .card p { font-size: 22px; font-weight: bold; margin: 5px 0; color: #2c3e50; }
-                .table-container { background: white; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); overflow: hidden; }
-                table { width: 100%; border-collapse: collapse; }
-                th { background: #f8f9fa; padding: 12px; text-align: right; font-size: 12px; border-bottom: 2px solid #eee; }
-            </style>
-        </head>
-        <body>
-            <div class="container" style="text-align: center;">
-                <h1>📊 لوحة تحكم AR.SA</h1>
-                <a href="${installUrl}" class="install-btn">تثبيت الإضافة في Stremio</a>
-                
-                <div class="stats-grid">
-                    <div class="card"><h3>الإجمالي</h3><p>${totalSubs}</p></div>
-                    <div class="card"><h3>AI 🤖</h3><p>${aiSubs}</p></div>
-                    <div class="card"><h3>أصلي</h3><p>${totalSubs - aiSubs}</p></div>
-                </div>
-
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>اسم المحتوى</th>
-                                <th style="text-align: center;">النوع</th>
-                                <th style="text-align: center;">التحكم</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rows || '<tr><td colspan="3" style="text-align:center; padding:20px;">لا يوجد بيانات</td></tr>'}</tbody>
-                    </table>
-                </div>
+    res.send(`
+    <!DOCTYPE html>
+    <html dir="rtl">
+    <head><meta charset="UTF-8"><title>AR.SA Admin</title></head>
+    <body style="font-family:sans-serif; background:#f8f9fa; padding:20px;">
+        <div style="max-width:800px; margin:auto;">
+            <h1 style="text-align:center;">🛠️ لوحة تحكم AR.SA</h1>
+            
+            <div style="background:white; padding:20px; border-radius:15px; margin-bottom:20px; box-shadow:0 4px 10px rgba(0,0,0,0.05);">
+                <h3>🔍 ابحث عن معرف الفيلم (IMDb ID)</h3>
+                <input type="text" id="movieSearch" placeholder="اكتب اسم الفيلم هنا..." style="width:70%; padding:10px;">
+                <button onclick="searchIMDb()" style="width:25%; padding:10px; background:#f1c40f; border:none; cursor:pointer;">بحث</button>
+                <div id="results" style="margin-top:10px; font-size:13px; color:#555;"></div>
             </div>
-        </body>
-        </html>
-        `;
-        res.setHeader('Content-Type', 'text/html; charset=utf-8');
-        res.send(html);
-    } catch (e) { res.status(500).send("Error"); }
+
+            <div style="background:white; padding:20px; border-radius:15px; margin-bottom:20px;">
+                <h3>📤 رفع ترجمة يدوية</h3>
+                <form action="/upload-manual" method="POST" enctype="multipart/form-data">
+                    <input type="text" name="imdbId" placeholder="IMDb ID (مثال: tt1234567)" required style="width:48%; padding:10px;">
+                    <input type="text" name="label" placeholder="اسم النسخة" required style="width:48%; padding:10px;">
+                    <input type="file" name="subtitleFile" accept=".srt" required style="width:100%; margin:10px 0;">
+                    <button type="submit" style="width:100%; padding:12px; background:#27ae60; color:white; border:none; cursor:pointer;">رفع واعتماد</button>
+                </form>
+            </div>
+
+            <div style="background:white; padding:20px; border-radius:15px;">
+                <h3>📊 آخر الملفات (الإجمالي: ${total})</h3>
+                <table style="width:100%; border-collapse:collapse;">
+                    ${rows}
+                </table>
+            </div>
+        </div>
+
+        <script>
+            async function searchIMDb() {
+                const q = document.getElementById('movieSearch').value;
+                const res = await fetch('/search-id?q=' + q);
+                const data = await res.json();
+                let html = '<ul>';
+                data.slice(0, 5).forEach(item => {
+                    html += '<li><b>' + item.title + ' (' + item.year + '):</b> <code style="background:#eee; padding:2px 5px;">' + item.id + '</code></li>';
+                });
+                document.getElementById('results').innerHTML = html + '</ul>';
+            }
+        </script>
+    </body>
+    </html>`);
 });
 
-/**
- * 7. تشغيل الواجهة
- */
-const addonRouter = getRouter(addonInterface);
-app.use("/", addonRouter);
+// --- بقية المسارات ---
+app.get("/delete/:fileId", async (req, res) => {
+    await Subtitle.deleteOne({ fileId: req.params.fileId });
+    res.redirect('/stats');
+});
+app.get("/sub/:fileId.srt", async (req, res) => {
+    const sub = await Subtitle.findOne({ fileId: req.params.fileId.replace('.srt', '') });
+    if (sub) {
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.send(sub.arabicText);
+    } else res.status(404).send("Not found");
+});
 
+app.use("/", getRouter(addonInterface));
 const port = process.env.PORT || 10000;
-app.listen(port, () => {
-    console.log(`🚀 Server Online: https://chb-gy3n.onrender.com/stats`);
-});
+app.listen(port, () => console.log("🚀 Server Online"));
