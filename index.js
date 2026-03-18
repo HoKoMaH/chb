@@ -10,10 +10,10 @@ const upload = multer({ storage: multer.memoryStorage() });
 const app = express();
 
 /**
- * 1. إعدادات استقبال البيانات (حل مشكلة الحجم والتعليق)
+ * 1. إعدادات استقبال البيانات
  */
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 /**
  * 2. الاتصال بقاعدة البيانات
@@ -48,7 +48,7 @@ app.get("/search-id", async (req, res) => {
 });
 
 /**
- * 5. مسار تعديل المزامنة
+ * 5. مسار تعديل المزامنة (Offset)
  */
 app.post("/adjust-sync", async (req, res) => {
     try {
@@ -80,7 +80,7 @@ app.post("/adjust-sync", async (req, res) => {
 });
 
 /**
- * 6. واجهة التعديل والتحميل
+ * 6. واجهة التعديل والتحميل (مع زر التعريب اليدوي)
  */
 app.get("/edit/:fileId", async (req, res) => {
     const sub = await Subtitle.findOne({ fileId: req.params.fileId });
@@ -93,7 +93,7 @@ app.get("/edit/:fileId", async (req, res) => {
                 <button onclick="downloadSrt()" style="background:#34495e; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">📥 تحميل SRT</button>
             </div>
             <div style="background:#f8f9fa; padding:15px; border-radius:10px; margin-bottom:15px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                <b>🤖 AI:</b> <button onclick="instantTranslate()" style="background:#8e44ad; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">تعريب</button>
+                <b>🤖 AI:</b> <button onclick="instantTranslate()" style="background:#8e44ad; color:white; border:none; padding:8px 15px; border-radius:5px; cursor:pointer;">ابدأ التعريب الآن</button>
                 <b style="margin-right:20px;">⏱️ مزامنة:</b>
                 <button onclick="shiftSync(-0.5)" style="background:#e67e22; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer;">-0.5s</button>
                 <button onclick="shiftSync(0.5)" style="background:#3498db; color:white; border:none; padding:8px 12px; border-radius:5px; cursor:pointer;">+0.5s</button>
@@ -103,7 +103,7 @@ app.get("/edit/:fileId", async (req, res) => {
                 <input type="hidden" name="fileId" value="${sub.fileId}">
                 <textarea id="txt" name="newText" style="width:100%; height:60vh; padding:15px; border-radius:10px; font-family:monospace;">${sub.arabicText}</textarea>
                 <div style="text-align:center; margin-top:20px;">
-                    <button type="submit" style="background:#2ecc71; color:white; padding:15px 50px; border:none; border-radius:10px; cursor:pointer; font-weight:bold;">حفظ ✅</button>
+                    <button type="submit" style="background:#2ecc71; color:white; padding:15px 50px; border:none; border-radius:10px; cursor:pointer; font-weight:bold;">حفظ التغييرات ✅</button>
                     <a href="/stats" style="margin-right:20px; color:#666; text-decoration:none;">إلغاء</a>
                 </div>
             </form>
@@ -114,11 +114,14 @@ app.get("/edit/:fileId", async (req, res) => {
                 const a = document.createElement('a'); a.download = "${sub.label}.srt"; a.href = window.URL.createObjectURL(blob); a.click();
             }
             async function instantTranslate() {
-                if(!confirm('بدء التعريب؟')) return;
-                document.getElementById('status').innerText = '⏳ جاري...';
+                if(!confirm('هل تريد تعريب هذا الملف يدوياً؟ قد يستغرق الأمر دقيقتين للملفات الضخمة.')) return;
+                document.getElementById('status').innerText = '⏳ جاري التعريب (راقب الـ Logs)...';
                 const res = await fetch('/instant-translate', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ text: document.getElementById('txt').value }) });
                 const result = await res.text();
-                if(result) { document.getElementById('txt').value = result; document.getElementById('status').innerText = '✅ تم'; }
+                if(result) { 
+                    document.getElementById('txt').value = result; 
+                    document.getElementById('status').innerText = '✅ اكتمل التعريب!'; 
+                }
             }
             async function shiftSync(offset) {
                 const res = await fetch('/adjust-sync', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ text: document.getElementById('txt').value, offset }) });
@@ -130,7 +133,7 @@ app.get("/edit/:fileId", async (req, res) => {
 });
 
 /**
- * 7. واجهة الإحصائيات (Stats)
+ * 7. لوحة التحكم الرئيسية (Stats)
  */
 app.get("/stats", async (req, res) => {
     try {
@@ -144,13 +147,13 @@ app.get("/stats", async (req, res) => {
                 <td style="padding: 12px; font-size: 13px;">${sub.label} <br> <small style="color:#888;">ID: ${sub.imdbId}</small></td>
                 <td style="padding: 12px; text-align: center;">${sub.isAI ? '🤖 AI' : '🇸🇦 أصلية'}</td>
                 <td style="padding: 12px; text-align: center;">
-                    <a href="/edit/${sub.fileId}" style="text-decoration:none; background:#3498db; color:white; padding:5px 10px; border-radius:5px;">تعديل</a>
+                    <a href="/edit/${sub.fileId}" style="text-decoration:none; background:#3498db; color:white; padding:5px 10px; border-radius:5px;">تعديل/تعريب</a>
                     <a href="/delete/${sub.fileId}" onclick="return confirm('حذف؟')" style="text-decoration:none; background:#e74c3c; color:white; padding:5px 10px; border-radius:5px;">حذف</a>
                 </td>
             </tr>`).join('');
 
         res.send(`
-        <html dir="rtl"><head><meta charset="UTF-8"><title>AR.SA Admin</title>
+        <html dir="rtl"><head><meta charset="UTF-8"><title>لوحة تحكم AR.SA</title>
         <style>
             body { font-family: sans-serif; background: #f4f7f6; padding: 20px; }
             .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
@@ -162,9 +165,8 @@ app.get("/stats", async (req, res) => {
         </style></head>
         <body>
             <div style="max-width: 900px; margin: auto; text-align:center;">
-                <h1>📊 لوحة تحكم AR.SA الذكية</h1>
-                <p style="color:#d35400;">✨ ميزة التحويل العالمي: أي لغة ستتحول للعربية تلقائياً عند الرفع ✨</p>
-                <a href="${installUrl}" style="background:#8e44ad; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold; display:inline-block; margin-bottom:20px;">+ تثبيت في Stremio</a>
+                <h1>📊 إدارة ترجمات AR.SA</h1>
+                <a href="${installUrl}" style="background:#8e44ad; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold; display:inline-block; margin-bottom:20px;">+ تثبيت الإضافة في Stremio</a>
                 <div class="stats-grid">
                     <div class="card" style="border-top:4px solid #3498db;"><h3>الإجمالي</h3><p>${totalSubs}</p></div>
                     <div class="card" style="border-top:4px solid #2ecc71;"><h3>🤖 AI</h3><p>${aiSubs}</p></div>
@@ -172,30 +174,30 @@ app.get("/stats", async (req, res) => {
                 </div>
                 <div class="grid-2">
                     <div class="card">
-                        <h3>🔍 بحث IMDb ID</h3>
-                        <input id="q" placeholder="اسم الفيلم..." onkeyup="if(event.keyCode===13) search()"><button onclick="search()" style="background:#f1c40f;">بحث</button>
+                        <h3>🔍 البحث عن محتوى (IMDb)</h3>
+                        <input id="q" placeholder="اسم الفيلم أو المسلسل..." onkeyup="if(event.keyCode===13) search()"><button onclick="search()" style="background:#f1c40f;">بحث</button>
                         <div id="r" style="text-align:right; font-size:12px; margin-top:10px; border:1px solid #eee; border-radius:8px; max-height:180px; overflow:auto;"></div>
                     </div>
                     <div class="card">
-                        <h3>📤 رفع يدوي (تعريب تلقائي)</h3>
+                        <h3>📤 رفع ملف يدوي (بدون تعريب)</h3>
                         <form action="/upload-manual" method="POST" enctype="multipart/form-data">
                             <select name="type" id="type" onchange="toggleFields()">
                                 <option value="movie">🎬 فيلم</option>
                                 <option value="series">📺 مسلسل</option>
                             </select>
-                            <input name="imdbId" id="manual_id" placeholder="IMDb ID الرئيسي (tt...)" required>
+                            <input name="imdbId" id="manual_id" placeholder="IMDb ID (tt...)" required>
                             <div id="sFields" style="display:none; gap:5px;">
                                 <input type="number" name="season" placeholder="موسم" style="width:50%">
                                 <input type="number" name="episode" placeholder="حلقة" style="width:50%">
                             </div>
                             <input name="label" id="manual_label" placeholder="اسم النسخة" required>
                             <input type="file" name="subtitleFile" accept=".srt" required>
-                            <button type="submit" style="background:#27ae60; color:white; font-weight:bold;">رفع واعتماد</button>
+                            <button type="submit" style="background:#27ae60; color:white; font-weight:bold;">حفظ في السيرفر</button>
                         </form>
                     </div>
                 </div>
-                <div class="card"><table style="width:100%; border-collapse:collapse;">
-                    <thead style="background:#f8f9fa;"><tr><th>المحتوى</th><th>النوع</th><th>الإجراء</th></tr></thead>
+                <div class="card"><table style="width:100%; border-collapse:collapse; text-align:right;">
+                    <thead style="background:#f8f9fa;"><tr><th style="padding:10px;">المحتوى</th><th style="text-align:center;">المصدر</th><th style="text-align:center;">الإجراء</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table></div>
             </div>
@@ -205,7 +207,7 @@ app.get("/stats", async (req, res) => {
                     const q = document.getElementById('q').value; if(!q) return;
                     const res = await fetch('/search-id?q=' + q); const data = await res.json();
                     document.getElementById('r').innerHTML = data.slice(0,8).map(i => {
-                        return \`<div class="search-item" onclick="copyToUpload('\${i.id}', '\${i.l}', \${i.q === 'TV series'})"><b>\${i.l} (\${i.y})</b> - <code>\${i.id}</code></div>\`;
+                        return \`<div class="search-item" onclick="copyToUpload('\${i.id}', '\${i.l}', \${i.q === 'TV series'})"><b>\${i.l} (\${i.y || ''})</b> - <code>\${i.id}</code></div>\`;
                     }).join('');
                 }
                 function copyToUpload(id, title, isSeries) {
@@ -214,7 +216,7 @@ app.get("/stats", async (req, res) => {
                     document.getElementById('type').value = isSeries ? 'series' : 'movie';
                     toggleFields();
                     navigator.clipboard.writeText(id);
-                    alert('✅ تم النسخ والتعبئة لـ: ' + title);
+                    alert('✅ تم اختيار: ' + title);
                 }
             </script>
         </body></html>`);
@@ -222,8 +224,10 @@ app.get("/stats", async (req, res) => {
 });
 
 /**
- * 8. المسارات الخلفية (تم دمج التعريب التلقائي هنا)
+ * 8. المسارات الخلفية
  */
+
+// مسار الرفع اليدوي (بدون أي تعريب تلقائي)
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     try {
         let { imdbId, type, season, episode, label } = req.body;
@@ -231,40 +235,34 @@ app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
         let technicalId = type === 'series' ? `${cleanId}:${season || 1}:${episode || 1}` : cleanId;
         const dbFileId = `${technicalId.replace(/:/g, '_')}_manual_${Date.now()}`;
 
-        let originalText = req.file.buffer.toString('utf8');
-        let finalText = originalText;
-        let isTranslated = false;
-
-        // فحص وجود الحروف العربية
-        const arabicPattern = /[\u0600-\u06FF]/;
-        if (!arabicPattern.test(originalText.substring(0, 2000))) {
-            console.log(`[GLOBAL-AI] 🌍 تم اكتشاف لغة أجنبية لـ ${technicalId}. جاري التحويل...`);
-            const translated = await translateToArabic(originalText);
-            if (translated) {
-                finalText = translated;
-                isTranslated = true;
-            }
-        }
-
         await Subtitle.findOneAndUpdate({ fileId: dbFileId }, {
             imdbId: technicalId,
-            arabicText: finalText,
-            label: isTranslated ? `🤖 AI | ${label}` : label,
-            isAI: isTranslated
+            arabicText: req.file.buffer.toString('utf8'), // الحفظ كما هو
+            label: label,
+            isAI: false
         }, { upsert: true });
 
         res.redirect('/stats');
     } catch (e) { res.status(500).send(e.message); }
 });
 
+// مسار التعريب الفوري (يُستدعى يدوياً من صفحة التعديل)
 app.post("/instant-translate", async (req, res) => {
-    const translated = await translateToArabic(req.body.text);
-    res.send(translated || "");
+    try {
+        // سيتم معالجة النص بواسطة scraper.js بنظام الأجزاء الصغيرة
+        const translated = await translateToArabic(req.body.text);
+        res.send(translated || req.body.text);
+    } catch (e) { res.status(500).send(req.body.text); }
 });
 
 app.post("/save-edit", async (req, res) => {
-    await Subtitle.findOneAndUpdate({ fileId: req.body.fileId }, { arabicText: req.body.newText });
-    res.send("<script>alert('تم الحفظ!'); window.location.href='/stats';</script>");
+    // نتحقق إذا كان النص يحتوي على حروف عربية لنحدد إذا كان AI أم لا
+    const hasArabic = /[\u0600-\u06FF]/.test(req.body.newText);
+    await Subtitle.findOneAndUpdate({ fileId: req.body.fileId }, { 
+        arabicText: req.body.newText,
+        isAI: !hasArabic // إذا عدلته وبقي بدون عربي يعتبر محمل كأجنبي، لكن المنطق يقتضي تعريبه يدوياً
+    });
+    res.send("<script>alert('تم الحفظ بنجاح!'); window.location.href='/stats';</script>");
 });
 
 app.get("/delete/:fileId", async (req, res) => {
