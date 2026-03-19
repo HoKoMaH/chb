@@ -10,7 +10,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 const app = express();
 
 /**
- * 1. إعدادات استقبال البيانات والملفات الضخمة
+ * 1. إعدادات استقبال البيانات
  */
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
@@ -36,7 +36,65 @@ const SubtitleSchema = new mongoose.Schema({
 const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
 
 /**
- * 4. محرك بحث IMDb ID
+ * 4. CSS المطور (الألوان، الوضع الليلي، والـ ID المميز)
+ */
+const commonCSS = `
+<style>
+    :root { 
+        --bg: #f4f7f6; --card: white; --text: #2c3e50; --text-dim: #7f8c8d; 
+        --border: #dfe6e9; --accent: #3498db; --imdb-bg: rgba(52, 152, 219, 0.1); --imdb-text: #3498db;
+    }
+    body.dark-mode { 
+        --bg: #121212; --card: #1e1e1e; --text: #ffffff; --text-dim: #b2bec3; 
+        --border: #2d3436; --accent: #f1c40f; --imdb-bg: rgba(241, 196, 15, 0.2); --imdb-text: #f1c40f;
+    }
+    
+    body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 20px; transition: 0.3s; line-height: 1.6; }
+    .card, .box { background: var(--card); padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); margin-bottom: 20px; border: 1px solid var(--border); }
+    
+    h1, h2, h3 { color: var(--text); }
+    
+    .imdb-badge {
+        background: var(--imdb-bg); color: var(--imdb-text); padding: 2px 8px; border-radius: 6px;
+        font-family: monospace; font-weight: bold; font-size: 0.85rem; border: 1px solid var(--imdb-bg);
+    }
+
+    input, select, textarea { width: 100%; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); box-sizing: border-box; }
+    
+    .night-toggle {
+        position: fixed; bottom: 20px; left: 20px; z-index: 1000;
+        width: 55px; height: 55px; border-radius: 50%;
+        background: var(--accent); color: #000; border: none; cursor: pointer;
+        font-size: 24px; box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        display: flex; align-items: center; justify-content: center;
+    }
+
+    .btn { padding: 10px 20px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; color: white; transition: 0.3s; text-decoration: none; display: inline-block; text-align: center; }
+    .btn:hover { opacity: 0.8; transform: translateY(-1px); }
+    
+    table { width: 100%; border-collapse: collapse; text-align: right; margin-top: 10px; }
+    th { background: rgba(0,0,0,0.05); padding: 12px; color: var(--text); }
+    body.dark-mode th { background: rgba(255,255,255,0.05); }
+    td { padding: 12px; border-bottom: 1px solid var(--border); }
+</style>
+`;
+
+const nightModeScript = `
+<script>
+    function toggleDarkMode() {
+        const isDark = document.body.classList.toggle('dark-mode');
+        localStorage.setItem('darkMode', isDark ? 'enabled' : 'disabled');
+        document.getElementById('nightBtn').innerText = isDark ? '☀️' : '🌙';
+    }
+    if (localStorage.getItem('darkMode') === 'enabled') {
+        document.body.classList.add('dark-mode');
+        window.onload = () => { document.getElementById('nightBtn').innerText = '☀️'; };
+    }
+</script>
+`;
+
+/**
+ * 5. المسارات التقنية (Search, Translate, Sync)
  */
 app.get("/search-id", async (req, res) => {
     const query = req.query.q;
@@ -47,329 +105,231 @@ app.get("/search-id", async (req, res) => {
     } catch (e) { res.status(500).json([]); }
 });
 
-/**
- * 5. مسار التعريب المباشر (إصدار البث الآمن للملفات الضخمة)
- */
 app.post("/instant-translate", async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no'); // هامة لمنع التقطيع في Render
-
-    const sendLog = (msg) => {
-        const cleanMsg = msg.replace(/\n/g, ' ');
-        res.write(`data: ${cleanMsg}\n\n`);
-    };
-
+    res.setHeader('X-Accel-Buffering', 'no');
+    const sendLog = (msg) => res.write(`data: ${msg.replace(/\n/g, ' ')}\n\n`);
     try {
-        sendLog("🚀 بدء عملية التعريب الشامل عبر محرك البحث السريع...");
-        if (!req.body.text || req.body.text.length < 10) throw new Error("النص قصير جداً.");
-        
-        // استدعاء المترجم مع تمرير دالة النسبة المئوية
-        const translated = await translateToArabic(req.body.text, (percent) => {
-            sendLog(`⏳ جاري المعالجة: ${percent}%`);
-        });
-
-        if (translated && translated.length > 10) {
-            sendLog("✅ تمت عملية الترجمة بنجاح 100%");
-            // نغلف النتيجة بـ JSON لضمان وصولها كاملة دون تأثر ببروتوكول SSE
-            const resultData = JSON.stringify({ result: translated });
-            res.write(`data: [RESULT]${resultData}\n\n`);
-        } else {
-            throw new Error("فشل التعريب.");
+        sendLog("🚀 بدء التعريب...");
+        const translated = await translateToArabic(req.body.text, (p) => sendLog(`⏳ جاري المعالجة: ${p}%`));
+        if (translated) {
+            sendLog("✅ اكتمل بنجاح");
+            res.write(`data: [RESULT]${JSON.stringify({ result: translated })}\n\n`);
         }
-    } catch (e) {
-        sendLog(`❌ خطأ: ${e.message}`);
-    } finally {
-        res.end();
-    }
+    } catch (e) { sendLog(`❌ خطأ: ${e.message}`); } finally { res.end(); }
 });
 
-/**
- * 6. مسار تعديل المزامنة
- */
 app.post("/adjust-sync", async (req, res) => {
     try {
         const { text, offset } = req.body;
         const seconds = parseFloat(offset);
-        if (isNaN(seconds)) return res.send(text);
-        
-        const adjustTime = (timeStr) => {
-            let [hms, ms] = timeStr.split(',');
+        const adjustTime = (t) => {
+            let [hms, ms] = t.split(',');
             let [h, m, s] = hms.split(':').map(parseFloat);
-            let totalMs = (h * 3600000) + (m * 60000) + (s * 1000) + parseInt(ms);
-            totalMs += (seconds * 1000);
-            if (totalMs < 0) totalMs = 0;
-            let nh = Math.floor(totalMs / 3600000);
-            let nm = Math.floor((totalMs % 3600000) / 60000);
-            let ns = Math.floor((totalMs % 60000) / 1000);
-            let nms = totalMs % 1000;
-            return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}:${String(ns).padStart(2, '0')},${String(nms).padStart(3, '0')}`;
+            let total = (h * 3600000) + (m * 60000) + (s * 1000) + parseInt(ms) + (seconds * 1000);
+            if (total < 0) total = 0;
+            const pad = (n, l=2) => String(Math.floor(n)).padStart(l, '0');
+            return `${pad(total/3600000)}:${pad((total%3600000)/60000)}:${pad((total%60000)/1000)},${pad(total%1000, 3)}`;
         };
-
-        const lines = text.split('\n');
-        const updatedLines = lines.map(line => {
-            if (line.includes(' --> ')) {
-                let [start, end] = line.split(' --> ');
-                return `${adjustTime(start)} --> ${adjustTime(end)}`;
-            }
-            return line;
-        });
-        res.send(updatedLines.join('\n'));
+        res.send(text.split('\n').map(l => l.includes(' --> ') ? l.split(' --> ').map(adjustTime).join(' --> ') : l).join('\n'));
     } catch (e) { res.status(500).send(req.body.text); }
 });
 
 /**
- * 7. واجهة التعديل (Edit Page) مع سكريبت استقبال البيانات المطور
+ * 6. واجهة التعديل (Edit Page)
  */
 app.get("/edit/:fileId", async (req, res) => {
     const sub = await Subtitle.findOne({ fileId: req.params.fileId });
     if (!sub) return res.send("الملف غير موجود");
     res.send(`
-    <html dir="rtl"><head><meta charset="UTF-8"><title>محرر الترجمة | AR.SA</title>
-    <style>
-        body { font-family:sans-serif; padding:20px; background:#f4f7f6; color:#333; }
-        .box { max-width:1000px; margin:auto; background:white; padding:25px; border-radius:15px; box-shadow:0 4px 15px rgba(0,0,0,0.1); }
-        textarea { width:100%; height:55vh; padding:15px; border-radius:10px; font-family:monospace; border:1px solid #ddd; font-size:14px; line-height:1.6; }
-        .log-win { background:#1e1e1e; color:#00ff00; padding:15px; border-radius:8px; font-family:monospace; font-size:13px; max-height:120px; overflow-y:auto; margin-bottom:15px; display:none; border-right:5px solid #8e44ad; }
-        .progress-container { width: 100%; background: #eee; height: 10px; border-radius: 10px; margin-bottom: 15px; display: none; overflow: hidden; }
-        .progress-bar { width: 0%; height: 100%; background: #2ecc71; transition: width 0.4s ease; }
-        .btn { padding:10px 20px; border-radius:8px; border:none; cursor:pointer; font-weight:bold; color:white; transition:0.3s; }
-        .btn:hover { opacity:0.8; }
-    </style></head>
+    <html dir="rtl"><head><meta charset="UTF-8"><title>المحرر | AR.SA</title>${commonCSS}</head>
     <body>
         <div class="box">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                <h2 style="margin:0;">🛠️ محرر الترجمة: ${sub.label}</h2>
-                <button onclick="downloadSrt()" class="btn" style="background:#34495e;">📥 تحميل SRT</button>
+                <h2>🛠️ محرر الترجمة: ${sub.label}</h2>
+                <div>
+                    <button onclick="downloadSrt()" class="btn" style="background:#34495e; margin-left:5px;">📥 تحميل SRT</button>
+                    <a href="/stats" class="btn" style="background:#7f8c8d;">❌ إلغاء</a>
+                </div>
             </div>
+            <div id="pCont" style="width:100%; background:#eee; height:8px; border-radius:10px; margin-bottom:10px; display:none; overflow:hidden;"><div id="pBar" style="width:0%; height:100%; background:#2ecc71; transition:0.3s;"></div></div>
+            <div id="logWin" style="background:#000; color:#0f0; padding:10px; border-radius:8px; font-family:monospace; font-size:12px; max-height:80px; overflow-y:auto; margin-bottom:10px; display:none;"></div>
             
-            <div id="pCont" class="progress-container"><div id="pBar" class="progress-bar"></div></div>
-            <div id="logWin" class="log-win"></div>
-
-            <div style="background:#f8f9fa; padding:15px; border-radius:10px; margin-bottom:15px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
-                <b>🤖 AI:</b> 
-                <button onclick="startInstantTranslate()" class="btn" style="background:#8e44ad;">ابدأ التعريب اليدوي (لوج حي)</button>
-                <b style="margin-right:20px;">⏱️ مزامنة:</b>
+            <div style="padding:10px; background:rgba(0,0,0,0.03); border-radius:8px; margin-bottom:10px; display:flex; gap:10px; align-items:center;">
+                <button onclick="startInstantTranslate()" class="btn" style="background:#8e44ad;">🤖 تعريب تلقائي</button>
                 <button onclick="shiftSync(-0.5)" class="btn" style="background:#e67e22;">-0.5s</button>
                 <button onclick="shiftSync(0.5)" class="btn" style="background:#3498db;">+0.5s</button>
-                <span id="status" style="color:#27ae60; font-weight:bold; margin-right:10px;"></span>
+                <span id="status" style="font-weight:bold; color:#27ae60;"></span>
             </div>
 
             <form action="/save-edit" method="POST">
                 <input type="hidden" name="fileId" value="${sub.fileId}">
-                <textarea id="txt" name="newText">${sub.arabicText}</textarea>
-                <div style="text-align:center; margin-top:20px;">
-                    <button type="submit" class="btn" style="background:#2ecc71; padding:15px 50px; font-size:16px;">حفظ التغييرات ✅</button>
-                    <a href="/stats" style="margin-right:20px; color:#666; text-decoration:none;">إلغاء والعودة</a>
+                <textarea id="txt" name="newText" style="height:60vh; font-family:monospace;">${sub.arabicText}</textarea>
+                <div style="text-align:center; margin-top:20px; display:flex; justify-content:center; gap:15px;">
+                    <button type="submit" class="btn" style="background:#2ecc71; padding:12px 60px; font-size:1.1rem;">حفظ التغييرات ✅</button>
+                    <a href="/stats" class="btn" style="background:#95a5a6; padding:12px 30px; font-size:1.1rem;">العودة للخلف</a>
                 </div>
             </form>
         </div>
+        <button id="nightBtn" onclick="toggleDarkMode()" class="night-toggle">🌙</button>
+        ${nightModeScript}
         <script>
-            function addLog(m) { const w = document.getElementById('logWin'); w.style.display='block'; w.innerHTML+='<div>'+m+'</div>'; w.scrollTop=w.scrollHeight; }
-            
             async function startInstantTranslate() {
-                if(!confirm('هل تريد تعريب هذا الملف يدوياً؟')) return;
-                const logW = document.getElementById('logWin'); logW.innerHTML=''; 
-                const pCont = document.getElementById('pCont'); pCont.style.display='block';
-                const pBar = document.getElementById('pBar'); pBar.style.width = '0%';
-                addLog('📡 جارِ الاتصال بالسيرفر لبدء التعريب...');
-                
-                const response = await fetch('/instant-translate', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({ text: document.getElementById('txt').value })
-                });
-
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder();
-                let accumulatedData = '';
-
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
-                    
-                    accumulatedData += decoder.decode(value);
-                    const chunks = accumulatedData.split('\\n\\n');
-                    
-                    // الاحتفاظ بآخر قطعة غير مكتملة
-                    accumulatedData = chunks.pop();
-
-                    for (let chunk of chunks) {
-                        if (chunk.startsWith('data: ')) {
-                            const data = chunk.replace('data: ', '');
-                            
-                            if (data.startsWith('[RESULT]')) {
-                                try {
-                                    const jsonContent = data.replace('[RESULT]', '');
-                                    const parsed = JSON.parse(jsonContent);
-                                    document.getElementById('txt').value = parsed.result;
-                                    document.getElementById('status').innerText = '✅ اكتمل التعريب!';
-                                    pBar.style.width = '100%';
-                                } catch(e) { console.error("Parse error", e); }
-                            } else if (data.includes('%')) {
-                                const percentMatch = data.match(/\\d+/);
-                                if(percentMatch) {
-                                    const percent = percentMatch[0];
-                                    pBar.style.width = percent + '%';
-                                    document.getElementById('status').innerText = '⏳ جاري المعالجة: ' + percent + '%';
-                                    addLog(data);
-                                }
-                            } else {
-                                addLog(data);
-                            }
-                        }
+                if(!confirm('بدء التعريب؟')) return;
+                const logW=document.getElementById('logWin'); logW.style.display='block'; logW.innerHTML='';
+                const pBar=document.getElementById('pBar'); document.getElementById('pCont').style.display='block';
+                const res = await fetch('/instant-translate', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:document.getElementById('txt').value}) });
+                const reader = res.body.getReader(); const decoder = new TextDecoder();
+                while(true) {
+                    const {value, done} = await reader.read(); if(done) break;
+                    const chunk = decoder.decode(value);
+                    if(chunk.includes('[RESULT]')) {
+                        const data = JSON.parse(chunk.split('[RESULT]')[1]);
+                        document.getElementById('txt').value = data.result;
+                        document.getElementById('status').innerText = '✅ اكتمل';
+                    } else {
+                        logW.innerHTML += '<div>' + chunk + '</div>';
+                        const p = chunk.match(/\\d+%/); if(p) pBar.style.width = p[0];
                     }
                 }
             }
-
             async function shiftSync(offset) {
-                const res = await fetch('/adjust-sync', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ text: document.getElementById('txt').value, offset }) });
-                const result = await res.text();
-                if(result) { document.getElementById('txt').value = result; document.getElementById('status').innerText = '✅ تم المزامنة'; }
+                const res = await fetch('/adjust-sync', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({text:document.getElementById('txt').value, offset}) });
+                document.getElementById('txt').value = await res.text();
             }
-
             function downloadSrt() {
-                const blob = new Blob([document.getElementById('txt').value], { type: 'text/plain' });
-                const a = document.createElement('a'); a.download = "${sub.label.replace(/'/g, '')}.srt"; a.href = window.URL.createObjectURL(blob); a.click();
+                const blob = new Blob([document.getElementById('txt').value], {type:'text/plain'});
+                const a = document.createElement('a'); a.download = "subtitle.srt"; a.href = window.URL.createObjectURL(blob); a.click();
             }
         </script>
     </body></html>`);
 });
 
 /**
- * 8. لوحة التحكم (Stats Page)
+ * 7. لوحة التحكم (Stats Page)
  */
 app.get("/stats", async (req, res) => {
-    try {
-        const totalSubs = await Subtitle.countDocuments();
-        const aiSubs = await Subtitle.countDocuments({ isAI: true });
-        const latestSubs = await Subtitle.find().sort({ createdAt: -1 }).limit(40);
-        const installUrl = `stremio://${process.env.RENDER_EXTERNAL_HOSTNAME || "chb-gy3n.onrender.com"}/manifest.json`;
+    const total = await Subtitle.countDocuments();
+    const ai = await Subtitle.countDocuments({ isAI: true });
+    const latest = await Subtitle.find().sort({ createdAt: -1 }).limit(50);
+    const installUrl = `stremio://${process.env.RENDER_EXTERNAL_HOSTNAME || "chb-gy3n.onrender.com"}/manifest.json`;
 
-        let rows = latestSubs.map(sub => `
-            <tr style="border-bottom: 1px solid #eee;">
-                <td style="padding: 12px; font-size: 13px;">${sub.label} <br> <small style="color:#888;">ID: ${sub.imdbId}</small></td>
-                <td style="padding: 12px; text-align: center;">${sub.isAI ? '🤖 AI' : '🇸🇦 أصلية'}</td>
-                <td style="padding: 12px; text-align: center;">
-                    <a href="/edit/${sub.fileId}" style="text-decoration:none; background:#3498db; color:white; padding:5px 10px; border-radius:5px; font-size:12px;">تعديل/تعريب</a>
-                    <a href="/delete/${sub.fileId}" onclick="return confirm('حذف؟')" style="text-decoration:none; background:#e74c3c; color:white; padding:5px 10px; border-radius:5px; font-size:12px;">حذف</a>
-                </td>
-            </tr>`).join('');
+    let rows = latest.map(s => {
+        const shortLabel = s.label.length > 50 ? s.label.substring(0, 47) + "..." : s.label;
+        const timeAgo = new Date(s.createdAt).toLocaleDateString('ar-EG');
+        return `
+        <tr>
+            <td style="padding:15px 12px;">
+                <div style="font-weight:bold; color:var(--text); margin-bottom:4px;">${shortLabel}</div>
+                <small style="display:flex; align-items:center; gap:8px; opacity:0.8;">
+                    <span class="imdb-badge">${s.imdbId}</span>
+                    <span style="color:var(--text-dim);">📅 ${timeAgo}</span>
+                </small>
+            </td>
+            <td style="text-align:center;">
+                <span style="background:${s.isAI ? '#8e44ad' : '#27ae60'}; color:white; padding:3px 10px; border-radius:6px; font-size:11px; font-weight:bold;">
+                    ${s.isAI ? '🤖 AI' : '🇸🇦 أصلية'}
+                </span>
+            </td>
+            <td style="text-align:center; white-space:nowrap;">
+                <a href="/edit/${s.fileId}" class="btn" style="background:#3498db; font-size:12px; padding:6px 14px;">تعديل</a>
+                <a href="/delete/${s.fileId}" onclick="return confirm('حذف؟')" class="btn" style="background:#e74c3c; font-size:12px; padding:6px 14px; margin-right:5px;">حذف</a>
+            </td>
+        </tr>`;
+    }).join('');
 
-        res.send(`
-        <html dir="rtl"><head><meta charset="UTF-8"><title>إدارة ترجمات Stremio</title>
-        <style>
-            body { font-family: sans-serif; background: #f4f7f6; padding: 20px; }
-            .card { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
-            input, select, button { width: 100%; padding: 10px; margin: 5px 0; border-radius: 8px; border: 1px solid #ddd; box-sizing: border-box; }
-            .stats-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
-            .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-            .search-item { padding: 8px; border-bottom: 1px solid #f0f0f0; cursor: pointer; transition: 0.2s; }
-            .search-item:hover { background: #e8f4fd; }
-            .danger-btn { background:#c0392b; color:white; border:none; padding:10px; border-radius:8px; cursor:pointer; font-weight:bold; }
-        </style></head>
-        <body>
-            <div style="max-width: 900px; margin: auto; text-align:center;">
-                <h1>📊 إدارة ترجمات Stremio</h1>
-                <a href="${installUrl}" style="background:#8e44ad; color:white; padding:12px 25px; border-radius:50px; text-decoration:none; font-weight:bold; display:inline-block; margin-bottom:20px;">+ تثبيت الإضافة في Stremio</a>
-                
-                <div class="stats-grid">
-                    <div class="card" style="border-top:4px solid #3498db;"><h3>الإجمالي</h3><p>${totalSubs}</p></div>
-                    <div class="card" style="border-top:4px solid #2ecc71;"><h3>🤖 AI</h3><p>${aiSubs}</p></div>
-                    <div class="card" style="border-top:4px solid #f1c40f;"><h3>أصلي</h3><p>${totalSubs - aiSubs}</p></div>
-                </div>
+    res.send(`
+    <html dir="rtl"><head><meta charset="UTF-8"><title>لوحة التحكم | AR.SA</title>${commonCSS}</head>
+    <body>
+        <div style="max-width:1100px; margin:auto;">
+            <div style="text-align:center; margin-bottom:30px;">
+                <h1>📊 لوحة التحكم AR.SA 📊</h1>
+                <a href="${installUrl}" class="btn" style="background:#8e44ad; padding:15px 40px; border-radius:50px; font-size:1.1rem;">+ تثبيت الإضافة في Stremio</a>
+            </div>
 
-                <div class="grid-2">
-                    <div class="card">
-                        <h3>🔍 البحث عن محتوى (تلقائي)</h3>
-                        <input id="q" placeholder="ابدأ بكتابة اسم الفيلم..." oninput="autoSearch()">
-                        <div id="r" style="text-align:right; font-size:12px; margin-top:10px; border:1px solid #eee; border-radius:8px; max-height:180px; overflow:auto;"></div>
-                    </div>
-                    <div class="card">
-                        <h3>📤 رفع ملف يدوي</h3>
-                        <form action="/upload-manual" method="POST" enctype="multipart/form-data">
-                            <select name="type" id="type" onchange="toggleFields()">
-                                <option value="movie">🎬 فيلم</option>
-                                <option value="series">📺 مسلسل</option>
-                            </select>
-                            <input name="imdbId" id="manual_id" placeholder="IMDb ID (tt...)" required>
-                            <div id="sFields" style="display:none; gap:5px;">
-                                <input type="number" name="season" placeholder="موسم" style="width:50%">
-                                <input type="number" name="episode" placeholder="حلقة" style="width:50%">
-                            </div>
-                            <input name="label" id="manual_label" placeholder="اسم النسخة" required>
-                            <input type="file" id="subFile" name="subtitleFile" accept=".srt" required onchange="updateLabel(this)">
-                            <button type="submit" style="background:#27ae60; color:white; font-weight:bold;">حفظ في السيرفر</button>
-                        </form>
-                    </div>
-                </div>
+            <div style="display:grid; grid-template-columns: repeat(3, 1fr); gap:20px; margin-bottom:30px; text-align:center;">
+                <div class="card" style="border-top:5px solid #3498db;"><h3>الإجمالي</h3><h2 style="font-size:2rem;">${total}</h2></div>
+                <div class="card" style="border-top:5px solid #8e44ad;"><h3>🤖 تعريب AI</h3><h2 style="font-size:2rem;">${ai}</h2></div>
+                <div class="card" style="border-top:5px solid #27ae60;"><h3>🇸🇦 أصلية</h3><h2 style="font-size:2rem;">${total - ai}</h2></div>
+            </div>
 
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:25px;">
                 <div class="card">
-                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px; padding:0 10px;">
-                        <h3 style="margin:0;">📁 الترجمات الأخيرة</h3>
-                        <button onclick="deleteAllSubtitles()" class="danger-btn">حذف الكل ⚠️</button>
-                    </div>
-                    <table style="width:100%; border-collapse:collapse; text-align:right;">
-                        <thead style="background:#f8f9fa;"><tr><th style="padding:10px;">المحتوى</th><th style="text-align:center;">المصدر</th><th style="text-align:center;">الإجراء</th></tr></thead>
-                        <tbody>${rows}</tbody>
-                    </table>
+                    <h3>🔍 بحث IMDb ID</h3>
+                    <input id="q" placeholder="ابحث عن اسم الفيلم..." oninput="autoSearch()">
+                    <div id="r" style="margin-top:10px; max-height:250px; overflow:auto; border-radius:8px;"></div>
+                </div>
+                <div class="card">
+                    <h3>📤 رفع ملف يدوي</h3>
+                    <form action="/upload-manual" method="POST" enctype="multipart/form-data">
+                        <select name="type" id="type" onchange="document.getElementById('sF').style.display=this.value==='series'?'flex':'none'">
+                            <option value="movie">🎬 فيلم</option><option value="series">📺 مسلسل</option>
+                        </select>
+                        <input name="imdbId" id="mid" placeholder="tt0000000" required>
+                        <div id="sF" style="display:none; gap:10px;"><input type="number" name="season" placeholder="موسم" style="width:50%"><input type="number" name="episode" placeholder="حلقة" style="width:50%"></div>
+                        <input name="label" id="mlab" placeholder="اسم النسخة" required>
+                        <input type="file" name="subtitleFile" id="fileInput" accept=".srt" required onchange="extractFileName()">
+                        <button type="submit" class="btn" style="background:#27ae60; width:100%; padding:15px; margin-top:5px;">✅ حفظ الملف</button>
+                    </form>
                 </div>
             </div>
-            <script>
-                function toggleFields(){ document.getElementById('sFields').style.display = document.getElementById('type').value==='series'?'flex':'none'; }
-                function updateLabel(input) { if (input.files[0]) document.getElementById('manual_label').value = input.files[0].name.replace('.srt',''); }
-                
-                let timer;
-                function autoSearch() {
-                    clearTimeout(timer); const q = document.getElementById('q').value;
-                    if(!q || q.length < 2) return;
-                    timer = setTimeout(async () => {
-                        const res = await fetch('/search-id?q=' + q); const data = await res.json();
-                        document.getElementById('r').innerHTML = data.slice(0,8).map(i => \`<div class="search-item" onclick="copyToUpload('\${i.id}', \${i.q === 'TV series'}, event)"><b>\${i.l} (\${i.y || ''})</b> - \${i.id}</div>\`).join('');
-                    }, 500);
+
+            <div class="card">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <h3 style="margin:0;">📁 أحدث الملفات</h3>
+                    <a href="/delete-all-now" onclick="return confirm('حذف الكل؟')" class="btn" style="background:#c0392b; font-size:0.9rem;">⚠️ مسح السجل</a>
+                </div>
+                <table>
+                    <thead><tr><th style="width:60%;">المحتوى والمعرف</th><th style="text-align:center;">المصدر</th><th style="text-align:center;">خيارات</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            </div>
+        </div>
+        <button id="nightBtn" onclick="toggleDarkMode()" class="night-toggle">🌙</button>
+        ${nightModeScript}
+        <script>
+            // وظيفة استخراج اسم النسخة تلقائياً من اسم الملف
+            function extractFileName() {
+                const fileInput = document.getElementById('fileInput');
+                const labelInput = document.getElementById('mlab');
+                if (fileInput.files.length > 0) {
+                    let fileName = fileInput.files[0].name;
+                    // إزالة الامتداد من الاسم
+                    labelInput.value = fileName.replace(/\.[^/.]+$/, "");
                 }
-                function copyToUpload(id, isSeries, event) {
-                    document.getElementById('manual_id').value = id;
-                    document.getElementById('type').value = isSeries ? 'series' : 'movie';
-                    toggleFields(); navigator.clipboard.writeText(id);
-                    document.querySelectorAll('.search-item').forEach(el => el.style.background = 'white');
-                    event.currentTarget.style.background = '#e8f4fd';
-                }
-                async function deleteAllSubtitles() {
-                    if(confirm("⚠️ حذف جميع الترجمات؟ لا يمكن التراجع!")) window.location.href = '/delete-all-now';
-                }
-            </script>
-        </body></html>`);
-    } catch (e) { res.status(500).send("Error"); }
+            }
+
+            let t; function autoSearch(){
+                clearTimeout(t); const q=document.getElementById('q').value;
+                if(q.length<2) return;
+                t=setTimeout(async()=>{
+                    const res=await fetch('/search-id?q='+q); const d=await res.json();
+                    document.getElementById('r').innerHTML = d.map(i=>\`<div style="padding:12px; border-bottom:1px solid var(--border); cursor:pointer;" onclick="document.getElementById('mid').value='\${i.id}'; document.getElementById('type').value='\${i.q==='TV series'?'series':'movie'}';"><b>\${i.l}</b> (\${i.y})</div>\`).join('');
+                },500);
+            }
+        </script>
+    </body></html>`);
 });
 
 /**
- * 9. مسارات التشغيل الخلفي
+ * 8. المسارات التقنية للرفع والحفظ والحذف
  */
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     try {
         let { imdbId, type, season, episode, label } = req.body;
-        let cleanId = imdbId.trim();
-        let technicalId = type === 'series' ? `${cleanId}:${season || 1}:${episode || 1}` : cleanId;
-        const dbFileId = `${technicalId.replace(/:/g, '_')}_manual_${Date.now()}`;
-        await Subtitle.findOneAndUpdate({ fileId: dbFileId }, {
-            imdbId: technicalId, 
-            arabicText: req.file.buffer.toString('utf8'), 
-            label, 
-            isAI: false
-        }, { upsert: true });
+        let technicalId = type === 'series' ? `${imdbId}:${season || 1}:${episode || 1}` : imdbId;
+        const dbId = `${technicalId.replace(/:/g, '_')}_man_${Date.now()}`;
+        await Subtitle.create({ fileId: dbId, imdbId: technicalId, arabicText: req.file.buffer.toString('utf8'), label, isAI: false });
         res.redirect('/stats');
     } catch (e) { res.status(500).send(e.message); }
 });
 
 app.post("/save-edit", async (req, res) => {
-    const hasArFa = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/.test(req.body.newText);
-    await Subtitle.findOneAndUpdate({ fileId: req.body.fileId }, { 
-        arabicText: req.body.newText, 
-        isAI: hasArFa && req.body.newText.length > 100 
-    });
-    res.send("<script>alert('تم الحفظ!'); window.location.href='/stats';</script>");
+    const isAr = /[\u0600-\u06FF]/.test(req.body.newText);
+    await Subtitle.findOneAndUpdate({ fileId: req.body.fileId }, { arabicText: req.body.newText, isAI: !isAr });
+    res.send("<script>alert('تم الحفظ بنجاح!'); window.location.href='/stats';</script>");
 });
 
 app.get("/delete/:fileId", async (req, res) => { await Subtitle.deleteOne({ fileId: req.params.fileId }); res.redirect('/stats'); });
