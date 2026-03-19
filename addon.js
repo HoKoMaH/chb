@@ -1,14 +1,16 @@
 const { addonBuilder } = require("stremio-addon-sdk");
-const mongoose = require('mongoose');
-const { getSmartSubtitles } = require("./scraper");
+const { createClient } = require('@supabase/supabase-js');
+
+// إعداد عميل Supabase داخل الـ Addon للوصول للبيانات
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 const manifest = {
     id: "community.ar_sa.ai",
-    version: "2.0.0",
+    version: "8.0.0",
     name: "AI Subtitles By HoKoMaH",
-    description: "ترجمات عربية حصرية بالذكاء الاصطناعي 🇸🇦",
+    description: "ترجمات عربية حصرية بالذكاء الاصطناعي 🇸🇦 عبر Supabase",
     logo: "https://i.imgur.com/huxCzjK.png",
-    background: "https://i.imgur.com/Is1Dciv.png", // اختياري
+    background: "https://i.imgur.com/Is1Dciv.png",
     resources: ["subtitles"],
     types: ["movie", "series"],
     idPrefixes: ["tt"],
@@ -17,29 +19,29 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-// استخدام الموديل الموجود أو تعريفه
-const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', new mongoose.Schema({
-    fileId: { type: String, unique: true },
-    imdbId: String,
-    arabicText: String,
-    label: String,
-    isAI: Boolean,
-    createdAt: { type: Date, expires: '30d', default: Date.now }
-}));
-
 builder.defineSubtitlesHandler(async (args) => {
-    const { id } = args;
+    const { id } = args; // معرف الفيلم tt...
     try {
-        const results = await getSmartSubtitles(id, Subtitle);
+        // جلب الترجمات الخاصة بهذا الـ ID من Supabase
+        const { data: results, error } = await supabase
+            .from('subtitles')
+            .select('*')
+            .eq('imdb_id', id);
+
+        if (error || !results || results.length === 0) return { subtitles: [] };
+
         return {
-            subtitles: results.map((s, i) => ({
-                id: s.fileId || `${id}_${i}`,
-                url: `https://${process.env.RENDER_EXTERNAL_HOSTNAME}/sub/${s.fileId || id.replace(/:/g,'_')}.srt`,
+            subtitles: results.map((s) => ({
+                id: s.file_id,
+                url: `https://${process.env.RENDER_EXTERNAL_HOSTNAME || 'chb-gy3n.onrender.com'}/sub/${s.file_id}.srt`,
                 lang: "ar-SA",
-                label: `🇸🇦 ${s.label} ${s.isAI ? '[AI]' : '[OFFICIAL]'}`
+                label: `🇸🇦 ${s.label} ${s.is_ai ? '[AI]' : '[OFFICIAL]'}`
             }))
         };
-    } catch (e) { return { subtitles: [] }; }
+    } catch (e) { 
+        console.error("Subtitles Error:", e);
+        return { subtitles: [] }; 
+    }
 });
 
 module.exports = builder.getInterface();
