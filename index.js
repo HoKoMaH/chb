@@ -16,19 +16,23 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 /**
- * 2. الاتصال بقاعدة البيانات (MongoDB) مع خيارات الاستقرار المتقدمة
+ * 2. الاتصال بقاعدة البيانات (MongoDB) - إعدادات الاستقرار القصوى
  */
 const dbOptions = {
-    serverSelectionTimeoutMS: 60000, 
+    serverSelectionTimeoutMS: 60000,
     connectTimeoutMS: 60000,
-    family: 4 
-    useUint8Array: true, // إضافة هذا الخيار لبعض إصدارات الموزع
-    directConnection: true // إجبار الاتصال المباشر
+    family: 4, // إجبار IPv4 لتجاوز مشاكل الـ DNS في Render
+    heartbeatFrequencyMS: 10000,
+    socketTimeoutMS: 45000,
 };
 
+// ملاحظة: تأكد من تحديث MONGO_URI في إعدادات Render (Environment Variables)
 mongoose.connect(process.env.MONGO_URI, dbOptions)
     .then(() => console.log("✅ [DATABASE] Connected Successfully!"))
-    .catch(err => console.error("❌ [DATABASE] Connection Failed:", err.message));
+    .catch(err => {
+        console.error("❌ [DATABASE] Connection Failed!");
+        console.error("Reason:", err.message);
+    });
 
 /**
  * 3. تعريف الموديل (Subtitle Schema)
@@ -70,7 +74,7 @@ app.post("/instant-translate", async (req, res) => {
     };
 
     try {
-        sendLog("🚀 بدء عملية التعريب الشامل عبر محرك البحث السريع...");
+        sendLog("🚀 بدء عملية التعريب الشامل...");
         if (!req.body.text || req.body.text.length < 10) throw new Error("النص قصير جداً.");
         
         const translated = await translateToArabic(req.body.text, (percent) => {
@@ -175,7 +179,7 @@ app.get("/edit/:fileId", async (req, res) => {
                 const reader = response.body.getReader(); const decoder = new TextDecoder(); let acc = '';
                 while (true) {
                     const { value, done } = await reader.read(); if (done) break;
-                    acc += decoder.decode(value); const chunks = acc.split('\\n\\n'); acc = chunks.pop();
+                    acc += decoder.decode(value); const chunks = acc.split('\n\n'); acc = chunks.pop();
                     for (let chunk of chunks) {
                         if (chunk.startsWith('data: ')) {
                             const data = chunk.replace('data: ', '');
@@ -184,7 +188,7 @@ app.get("/edit/:fileId", async (req, res) => {
                                 document.getElementById('txt').value = parsed.result;
                                 document.getElementById('status').innerText = '✅ اكتمل!';
                             } else if (data.includes('%')) {
-                                const p = data.match(/\\d+/)[0];
+                                const p = data.match(/\d+/)[0];
                                 document.getElementById('pBar').style.width = p + '%';
                                 addLog(data);
                             } else addLog(data);
@@ -199,7 +203,7 @@ app.get("/edit/:fileId", async (req, res) => {
             }
             function downloadSrt() {
                 const blob = new Blob([document.getElementById('txt').value], { type: 'text/plain' });
-                const a = document.createElement('a'); a.download = "${sub.label.replace(/'/g, '')}.srt"; a.href = window.URL.createObjectURL(blob); a.click();
+                const a = document.createElement('a'); a.download = `${sub.label.replace(/'/g, '')}.srt`; a.href = window.URL.createObjectURL(blob); a.click();
             }
         </script>
     </body></html>`);
