@@ -16,14 +16,15 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 /**
- * 2. الاتصال بقاعدة البيانات (MongoDB) - إعدادات الاستقرار القصوى
+ * 2. الاتصال بقاعدة البيانات (MongoDB) - إعدادات الاستقرار القصوى لتجاوز أخطاء الـ IP
  */
 const dbOptions = {
-    serverSelectionTimeoutMS: 60000,
-    connectTimeoutMS: 60000,
-    family: 4, // تجاوز مشاكل الـ DNS في Render
-    heartbeatFrequencyMS: 10000,
-    socketTimeoutMS: 45000,
+    serverSelectionTimeoutMS: 30000,
+    connectTimeoutMS: 30000,
+    family: 4, 
+    directConnection: true, // إجبار الاتصال لتجاوز مشاكل DNS في Render
+    retryWrites: true,
+    autoIndex: true
 };
 
 mongoose.connect(process.env.MONGO_URI, dbOptions)
@@ -124,55 +125,64 @@ app.post("/adjust-sync", async (req, res) => {
  * 7. واجهة التعديل (Edit Page)
  */
 app.get("/edit/:fileId", async (req, res) => {
-    const sub = await Subtitle.findOne({ fileId: req.params.fileId });
-    if (!sub) return res.send("الملف غير موجود");
-    
-    const pageHtml = `
-    <html dir="rtl"><head><meta charset="UTF-8"><title>محرر AR.SA</title>
-    <style>
-        body { font-family:sans-serif; padding:20px; background:#f4f7f6; }
-        .box { max-width:1000px; margin:auto; background:white; padding:25px; border-radius:15px; box-shadow:0 4px 15px rgba(0,0,0,0.1); }
-        textarea { width:100%; height:55vh; padding:15px; border-radius:10px; font-family:monospace; border:1px solid #ddd; }
-        .btn { padding:10px 20px; border-radius:8px; border:none; cursor:pointer; font-weight:bold; color:white; }
-    </style></head>
-    <body>
-        <div class="box">
-            <h2>🛠️ محرر الترجمة: ${sub.label}</h2>
-            <div style="background:#f8f9fa; padding:15px; border-radius:10px; margin-bottom:15px; display:flex; gap:10px;">
-                <button onclick="startInstantTranslate()" class="btn" style="background:#8e44ad;">🤖 تعريب تلقائي</button>
-                <button onclick="shiftSync(-0.5)" class="btn" style="background:#e67e22;">-0.5s</button>
-                <button onclick="shiftSync(0.5)" class="btn" style="background:#3498db;">+0.5s</button>
-            </div>
-            <form action="/save-edit" method="POST">
-                <input type="hidden" name="fileId" value="${sub.fileId}">
-                <textarea id="txt" name="newText">${sub.arabicText}</textarea>
-                <div style="text-align:center; margin-top:20px;">
-                    <button type="submit" class="btn" style="background:#2ecc71; padding:15px 50px;">حفظ التغييرات ✅</button>
+    try {
+        const sub = await Subtitle.findOne({ fileId: req.params.fileId });
+        if (!sub) return res.send("الملف غير موجود");
+
+        res.send(`
+        <html dir="rtl"><head><meta charset="UTF-8"><title>محرر AR.SA</title>
+        <style>
+            body { font-family:sans-serif; padding:20px; background:#f4f7f6; }
+            .box { max-width:1000px; margin:auto; background:white; padding:25px; border-radius:15px; box-shadow:0 4px 15px rgba(0,0,0,0.1); }
+            textarea { width:100%; height:55vh; padding:15px; border-radius:10px; font-family:monospace; border:1px solid #ddd; }
+            .btn { padding:10px 20px; border-radius:8px; border:none; cursor:pointer; font-weight:bold; color:white; transition:0.3s; }
+        </style></head>
+        <body>
+            <div class="box">
+                <h2>🛠️ محرر الترجمة: \${sub.label}</h2>
+                <div style="background:#f8f9fa; padding:15px; border-radius:10px; margin-bottom:15px; display:flex; gap:10px;">
+                    <button onclick="startInstantTranslate()" class="btn" style="background:#8e44ad;">🤖 تعريب تلقائي</button>
+                    <button onclick="shiftSync(-0.5)" class="btn" style="background:#e67e22;">-0.5s</button>
+                    <button onclick="shiftSync(0.5)" class="btn" style="background:#3498db;">+0.5s</button>
                 </div>
-            </form>
-        </div>
-        <script>
-            async function startInstantTranslate() {
-                if(!confirm('ابدأ التعريب؟')) return;
-                const response = await fetch('/instant-translate', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ text: document.getElementById('txt').value }) });
-                const reader = response.body.getReader(); const decoder = new TextDecoder();
-                while (true) {
-                    const { value, done } = await reader.read(); if (done) break;
-                    const chunk = decoder.decode(value);
-                    if (chunk.includes('[RESULT]')) {
-                        const cleanJson = chunk.split('[RESULT]')[1].split('\\n\\n')[0];
-                        document.getElementById('txt').value = JSON.parse(cleanJson).result;
-                        alert('تم التعريب!');
+                <form action="/save-edit" method="POST">
+                    <input type="hidden" name="fileId" value="\${sub.fileId}">
+                    <textarea id="txt" name="newText">\${sub.arabicText}</textarea>
+                    <div style="text-align:center; margin-top:20px;">
+                        <button type="submit" class="btn" style="background:#2ecc71; padding:15px 50px;">حفظ التغييرات ✅</button>
+                    </div>
+                </form>
+            </div>
+            <script>
+                async function startInstantTranslate() {
+                    if(!confirm('ابدأ التعريب؟')) return;
+                    const response = await fetch('/instant-translate', { 
+                        method: 'POST', 
+                        headers: {'Content-Type': 'application/json'}, 
+                        body: JSON.stringify({ text: document.getElementById('txt').value }) 
+                    });
+                    const reader = response.body.getReader(); const decoder = new TextDecoder();
+                    while (true) {
+                        const { value, done } = await reader.read(); if (done) break;
+                        const chunk = decoder.decode(value);
+                        if (chunk.includes('[RESULT]')) {
+                            const cleanJson = chunk.split('[RESULT]')[1].split('\\n\\n')[0];
+                            document.getElementById('txt').value = JSON.parse(cleanJson).result;
+                            alert('تم التعريب بنجاح!');
+                        }
                     }
                 }
-            }
-            async function shiftSync(offset) {
-                const res = await fetch('/adjust-sync', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ text: document.getElementById('txt').value, offset }) });
-                document.getElementById('txt').value = await res.text();
-            }
-        </script>
-    </body></html>`;
-    res.send(pageHtml);
+                async function shiftSync(offset) {
+                    const res = await fetch('/adjust-sync', { 
+                        method: 'POST', 
+                        headers: {'Content-Type': 'application/json'}, 
+                        body: JSON.stringify({ text: document.getElementById('txt').value, offset }) 
+                    });
+                    document.getElementById('txt').value = await res.text();
+                }
+            </script>
+        </body></html>`);
+    } catch (e) { res.status(500).send("Server Error"); }
 });
 
 /**
@@ -185,11 +195,11 @@ app.get("/stats", async (req, res) => {
 
         let rows = latestSubs.map(sub => `
             <tr style="border-bottom: 1px solid #eee;">
-                <td style="padding: 12px;">${sub.label}</td>
-                <td style="padding: 12px; text-align: center;">${sub.isAI ? '🤖' : '🇸🇦'}</td>
+                <td style="padding: 12px;">\${sub.label}</td>
+                <td style="padding: 12px; text-align: center;">\${sub.isAI ? '🤖' : '🇸🇦'}</td>
                 <td style="padding: 12px; text-align: center;">
-                    <a href="/edit/${sub.fileId}" style="color:#3498db;">تعديل</a> | 
-                    <a href="/delete/${sub.fileId}" style="color:#e74c3c;">حذف</a>
+                    <a href="/edit/\${sub.fileId}" style="text-decoration:none; color:#3498db;">تعديل</a> | 
+                    <a href="/delete/\${sub.fileId}" style="text-decoration:none; color:#e74c3c;">حذف</a>
                 </td>
             </tr>`).join('');
 
@@ -199,25 +209,31 @@ app.get("/stats", async (req, res) => {
         <body>
             <div style="max-width: 900px; margin: auto;">
                 <h1 style="text-align:center;">📊 لوحة تحكم AR.SA</h1>
-                <div style="text-align:center; margin-bottom:20px;"><a href="${installUrl}" style="background:#8e44ad; color:white; padding:10px 20px; border-radius:50px; text-decoration:none;">+ تثبيت الإضافة</a></div>
+                <div style="text-align:center; margin-bottom:20px;">
+                    <a href="\${installUrl}" style="background:#8e44ad; color:white; padding:10px 20px; border-radius:50px; text-decoration:none; font-weight:bold;">+ تثبيت الإضافة</a>
+                </div>
                 <div class="card">
-                    <h3>📤 رفع يدوي / بحث</h3>
-                    <form action="/upload-manual" method="POST" enctype="multipart/form-data">
-                        <input name="imdbId" placeholder="tt..." required style="width:20%; padding:8px;">
-                        <input name="label" placeholder="اسم النسخة" required style="width:40%; padding:8px;">
+                    <h3>📤 رفع يدوي</h3>
+                    <form action="/upload-manual" method="POST" enctype="multipart/form-data" style="display:flex; gap:10px; align-items:center;">
+                        <input name="imdbId" placeholder="tt..." required style="padding:8px; border-radius:5px; border:1px solid #ddd;">
+                        <input name="label" placeholder="اسم النسخة" required style="padding:8px; border-radius:5px; border:1px solid #ddd; flex:1;">
                         <input type="file" name="subtitleFile" accept=".srt" required>
-                        <button type="submit" style="padding:8px 20px; background:#27ae60; color:white; border:none; border-radius:5px;">حفظ</button>
+                        <button type="submit" style="padding:8px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer;">حفظ</button>
                     </form>
                 </div>
                 <div class="card">
                     <table style="width:100%; text-align:right; border-collapse:collapse;">
-                        <thead><tr style="background:#eee;"><th>المحتوى</th><th>النوع</th><th>الإجراء</th></tr></thead>
-                        <tbody>${rows}</tbody>
+                        <thead><tr style="background:#f8f9fa;">
+                            <th style="padding:12px;">المحتوى</th>
+                            <th style="padding:12px; text-align:center;">النوع</th>
+                            <th style="padding:12px; text-align:center;">الإجراء</th>
+                        </tr></thead>
+                        <tbody>\${rows}</tbody>
                     </table>
                 </div>
             </div>
         </body></html>`);
-    } catch (e) { res.status(500).send("Error"); }
+    } catch (e) { res.status(500).send("Error loading stats"); }
 });
 
 /**
