@@ -1,7 +1,7 @@
 const express = require('express');
 const { getRouter } = require("stremio-addon-sdk");
 const addonInterface = require("./addon");
-const mongoose = require('mongoose');
+const { createClient } = require('@supabase/supabase-js');
 const multer = require('multer');
 const axios = require('axios');
 const { translateToArabic } = require('./scraper'); 
@@ -9,46 +9,14 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
 
-/**
- * 1. إعدادات استقبال البيانات والملفات الضخمة
- */
+// 1. إعداد عميل Supabase
+const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 /**
- * 2. الاتصال بقاعدة البيانات (MongoDB Atlas)
- * ملاحظة: تم حذف directConnection ليتوافق مع الروابط العنقودية (Multi-host)
- */
-const dbOptions = {
-    serverSelectionTimeoutMS: 30000,
-    connectTimeoutMS: 30000,
-    family: 4, 
-    retryWrites: true,
-    autoIndex: true
-};
-
-mongoose.connect(process.env.MONGO_URI, dbOptions)
-    .then(() => console.log("✅ [DATABASE] Connected Successfully!"))
-    .catch(err => {
-        console.error("❌ [DATABASE] Connection Failed!");
-        console.error("Reason:", err.message);
-    });
-
-/**
- * 3. تعريف الموديل (Subtitle Schema)
- */
-const SubtitleSchema = new mongoose.Schema({
-    fileId: { type: String, unique: true },
-    imdbId: String,
-    arabicText: String,
-    label: String,
-    isAI: { type: Boolean, default: false },
-    createdAt: { type: Date, expires: '15d', default: Date.now }
-});
-const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
-
-/**
- * 4. محرك بحث IMDb ID
+ * 2. محرك بحث IMDb ID
  */
 app.get("/search-id", async (req, res) => {
     const query = req.query.q;
@@ -60,7 +28,7 @@ app.get("/search-id", async (req, res) => {
 });
 
 /**
- * 5. مسار التعريب المباشر (Streaming Response)
+ * 3. مسار التعريب المباشر (Streaming Response)
  */
 app.post("/instant-translate", async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -76,8 +44,7 @@ app.post("/instant-translate", async (req, res) => {
         });
 
         if (translated && translated.length > 10) {
-            const resultData = JSON.stringify({ result: translated });
-            res.write("data: [RESULT]" + resultData + "\n\n");
+            res.write("data: [RESULT]" + JSON.stringify({ result: translated }) + "\n\n");
         } else {
             throw new Error("فشل التعريب.");
         }
@@ -89,44 +56,16 @@ app.post("/instant-translate", async (req, res) => {
 });
 
 /**
- * 6. مسار تعديل المزامنة
- */
-app.post("/adjust-sync", async (req, res) => {
-    try {
-        const { text, offset } = req.body;
-        const seconds = parseFloat(offset);
-        if (isNaN(seconds)) return res.send(text);
-        
-        const adjustTime = (timeStr) => {
-            let [hms, ms] = timeStr.split(',');
-            let [h, m, s] = hms.split(':').map(parseFloat);
-            let totalMs = (h * 3600000) + (m * 60000) + (s * 1000) + parseInt(ms);
-            totalMs += (seconds * 1000);
-            if (totalMs < 0) totalMs = 0;
-            let nh = Math.floor(totalMs / 3600000);
-            let nm = Math.floor((totalMs % 3600000) / 60000);
-            let ns = Math.floor((totalMs % 60000) / 1000);
-            let nms = totalMs % 1000;
-            return String(nh).padStart(2, '0') + ":" + String(nm).padStart(2, '0') + ":" + String(ns).padStart(2, '0') + "," + String(nms).padStart(3, '0');
-        };
-
-        const updatedLines = text.split('\n').map(line => {
-            if (line.includes(' --> ')) {
-                let [start, end] = line.split(' --> ');
-                return adjustTime(start) + " --> " + adjustTime(end);
-            }
-            return line;
-        });
-        res.send(updatedLines.join('\n'));
-    } catch (e) { res.status(500).send(req.body.text); }
-});
-
-/**
- * 7. واجهة التعديل (Edit Page)
+ * 4. واجهة التعديل (Edit Page)
  */
 app.get("/edit/:fileId", async (req, res) => {
     try {
-        const sub = await Subtitle.findOne({ fileId: req.params.fileId });
+        const { data: sub, error } = await supabase
+            .from('subtitles')
+            .select('*')
+            .eq('file_id', req.params.fileId)
+            .single();
+
         if (!sub) return res.send("الملف غير موجود");
 
         res.send(`
@@ -142,12 +81,10 @@ app.get("/edit/:fileId", async (req, res) => {
                 <h2>🛠️ محرر الترجمة: \${sub.label}</h2>
                 <div style="background:#f8f9fa; padding:15px; border-radius:10px; margin-bottom:15px; display:flex; gap:10px;">
                     <button onclick="startInstantTranslate()" class="btn" style="background:#8e44ad;">🤖 تعريب تلقائي</button>
-                    <button onclick="shiftSync(-0.5)" class="btn" style="background:#e67e22;">-0.5s</button>
-                    <button onclick="shiftSync(0.5)" class="btn" style="background:#3498db;">+0.5s</button>
                 </div>
                 <form action="/save-edit" method="POST">
-                    <input type="hidden" name="fileId" value="\${sub.fileId}">
-                    <textarea id="txt" name="newText">\${sub.arabicText}</textarea>
+                    <input type="hidden" name="fileId" value="\${sub.file_id}">
+                    <textarea id="txt" name="newText">\${sub.arabic_text}</textarea>
                     <div style="text-align:center; margin-top:20px;">
                         <button type="submit" class="btn" style="background:#2ecc71; padding:15px 50px;">حفظ التغييرات ✅</button>
                     </div>
@@ -168,17 +105,8 @@ app.get("/edit/:fileId", async (req, res) => {
                         if (chunk.includes('[RESULT]')) {
                             const cleanJson = chunk.split('[RESULT]')[1].split('\\n\\n')[0];
                             document.getElementById('txt').value = JSON.parse(cleanJson).result;
-                            alert('تم التعريب بنجاح!');
                         }
                     }
-                }
-                async function shiftSync(offset) {
-                    const res = await fetch('/adjust-sync', { 
-                        method: 'POST', 
-                        headers: {'Content-Type': 'application/json'}, 
-                        body: JSON.stringify({ text: document.getElementById('txt').value, offset }) 
-                    });
-                    document.getElementById('txt').value = await res.text();
                 }
             </script>
         </body></html>`);
@@ -186,20 +114,25 @@ app.get("/edit/:fileId", async (req, res) => {
 });
 
 /**
- * 8. لوحة التحكم (Stats Page)
+ * 5. لوحة التحكم (Stats Page)
  */
 app.get("/stats", async (req, res) => {
     try {
-        const latestSubs = await Subtitle.find().sort({ createdAt: -1 }).limit(40);
+        const { data: latestSubs } = await supabase
+            .from('subtitles')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(40);
+
         const installUrl = "stremio://" + (process.env.RENDER_EXTERNAL_HOSTNAME || "chb-gy3n.onrender.com") + "/manifest.json";
 
-        let rows = latestSubs.map(sub => `
+        let rows = (latestSubs || []).map(sub => `
             <tr style="border-bottom: 1px solid #eee;">
                 <td style="padding: 12px;">\${sub.label}</td>
-                <td style="padding: 12px; text-align: center;">\${sub.isAI ? '🤖' : '🇸🇦'}</td>
+                <td style="padding: 12px; text-align: center;">\${sub.is_ai ? '🤖' : '🇸🇦'}</td>
                 <td style="padding: 12px; text-align: center;">
-                    <a href="/edit/\${sub.fileId}" style="text-decoration:none; color:#3498db;">تعديل</a> | 
-                    <a href="/delete/\${sub.fileId}" style="text-decoration:none; color:#e74c3c;">حذف</a>
+                    <a href="/edit/\${sub.file_id}" style="text-decoration:none; color:#3498db;">تعديل</a> | 
+                    <a href="/delete/\${sub.file_id}" style="text-decoration:none; color:#e74c3c;">حذف</a>
                 </td>
             </tr>`).join('');
 
@@ -209,25 +142,18 @@ app.get("/stats", async (req, res) => {
         <body>
             <div style="max-width: 900px; margin: auto;">
                 <h1 style="text-align:center;">📊 لوحة تحكم AR.SA</h1>
-                <div style="text-align:center; margin-bottom:20px;">
-                    <a href="\${installUrl}" style="background:#8e44ad; color:white; padding:10px 20px; border-radius:50px; text-decoration:none; font-weight:bold;">+ تثبيت الإضافة</a>
-                </div>
                 <div class="card">
                     <h3>📤 رفع يدوي</h3>
-                    <form action="/upload-manual" method="POST" enctype="multipart/form-data" style="display:flex; gap:10px; align-items:center;">
-                        <input name="imdbId" placeholder="tt..." required style="padding:8px; border-radius:5px; border:1px solid #ddd;">
-                        <input name="label" placeholder="اسم النسخة" required style="padding:8px; border-radius:5px; border:1px solid #ddd; flex:1;">
+                    <form action="/upload-manual" method="POST" enctype="multipart/form-data" style="display:flex; gap:10px;">
+                        <input name="imdbId" placeholder="tt..." required>
+                        <input name="label" placeholder="اسم النسخة" required style="flex:1;">
                         <input type="file" name="subtitleFile" accept=".srt" required>
-                        <button type="submit" style="padding:8px 20px; background:#27ae60; color:white; border:none; border-radius:5px; cursor:pointer;">حفظ</button>
+                        <button type="submit" style="background:#27ae60; color:white; border:none; padding:8px 20px; cursor:pointer;">حفظ</button>
                     </form>
                 </div>
                 <div class="card">
-                    <table style="width:100%; text-align:right; border-collapse:collapse;">
-                        <thead><tr style="background:#f8f9fa;">
-                            <th style="padding:12px;">المحتوى</th>
-                            <th style="padding:12px; text-align:center;">النوع</th>
-                            <th style="padding:12px; text-align:center;">الإجراء</th>
-                        </tr></thead>
+                    <table style="width:100%; text-align:right;">
+                        <thead><tr style="background:#f8f9fa;"><th>المحتوى</th><th>النوع</th><th>الإجراء</th></tr></thead>
                         <tbody>\${rows}</tbody>
                     </table>
                 </div>
@@ -237,36 +163,40 @@ app.get("/stats", async (req, res) => {
 });
 
 /**
- * 9. مسارات التشغيل النهائي
+ * 6. مسارات CRUD
  */
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
-    try {
-        let { imdbId, label } = req.body;
-        const dbFileId = imdbId.replace(/:/g, '_') + "_manual_" + Date.now();
-        await Subtitle.create({ fileId: dbFileId, imdbId, arabicText: req.file.buffer.toString('utf8'), label, isAI: false });
-        res.redirect('/stats');
-    } catch (e) { res.status(500).send(e.message); }
+    const { imdbId, label } = req.body;
+    const dbFileId = imdbId.replace(/:/g, '_') + "_manual_" + Date.now();
+    await supabase.from('subtitles').insert([
+        { file_id: dbFileId, imdb_id: imdbId, arabic_text: req.file.buffer.toString('utf8'), label, is_ai: false }
+    ]);
+    res.redirect('/stats');
 });
 
 app.post("/save-edit", async (req, res) => {
-    await Subtitle.findOneAndUpdate({ fileId: req.body.fileId }, { 
-        arabicText: req.body.newText, 
-        isAI: req.body.newText.length > 500 
-    });
+    await supabase.from('subtitles')
+        .update({ arabic_text: req.body.newText, is_ai: req.body.newText.length > 500 })
+        .eq('file_id', req.body.fileId);
     res.redirect('/stats');
 });
 
 app.get("/delete/:fileId", async (req, res) => { 
-    await Subtitle.deleteOne({ fileId: req.params.fileId }); 
+    await supabase.from('subtitles').delete().eq('file_id', req.params.fileId);
     res.redirect('/stats'); 
 });
 
 app.get("/sub/:fileId.srt", async (req, res) => {
-    const sub = await Subtitle.findOne({ fileId: req.params.fileId.replace('.srt', '') });
+    const { data: sub } = await supabase
+        .from('subtitles')
+        .select('arabic_text')
+        .eq('file_id', req.params.fileId.replace('.srt', ''))
+        .single();
+
     if (sub) { 
         res.setHeader('Content-Type', 'text/plain; charset=utf-8'); 
         res.setHeader('Access-Control-Allow-Origin', '*'); 
-        res.send(sub.arabicText); 
+        res.send(sub.arabic_text); 
     } else res.status(404).send("Not found");
 });
 
