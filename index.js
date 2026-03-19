@@ -9,7 +9,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 const app = express();
 
-// 1. إعداد عميل Supabase (بديل Mongoose)
+// 1. إعداد عميل Supabase
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 app.use(express.json({ limit: '100mb' }));
@@ -80,7 +80,7 @@ app.get("/edit/:fileId", async (req, res) => {
     </style></head>
     <body>
         <div class="box">
-            <h2>🛠️ محرر الترجمة: \${sub.label}</h2>
+            <h2>🛠️ محرر الترجمة: ${sub.label}</h2>
             <div id="pCont" class="progress-container"><div id="pBar" class="progress-bar"></div></div>
             <div id="logWin" class="log-win"></div>
             <div style="background:#f8f9fa; padding:15px; border-radius:10px; margin-bottom:15px; display:flex; gap:10px; align-items:center;">
@@ -88,8 +88,8 @@ app.get("/edit/:fileId", async (req, res) => {
                 <span id="status" style="color:#27ae60; font-weight:bold;"></span>
             </div>
             <form action="/save-edit" method="POST">
-                <input type="hidden" name="fileId" value="\${sub.file_id}">
-                <textarea id="txt" name="newText">\${sub.arabic_text}</textarea>
+                <input type="hidden" name="fileId" value="${sub.file_id}">
+                <textarea id="txt" name="newText">${sub.arabic_text}</textarea>
                 <div style="text-align:center; margin-top:20px;">
                     <button type="submit" class="btn" style="background:#2ecc71; padding:15px 50px;">حفظ التغييرات ✅</button>
                     <a href="/stats" style="margin-right:20px; color:#666; text-decoration:none;">إلغاء</a>
@@ -133,19 +133,19 @@ app.get("/stats", async (req, res) => {
         const { data: allData } = await supabase.from('subtitles').select('*').order('created_at', { ascending: false });
         const total = allData ? allData.length : 0;
         const aiCount = allData ? allData.filter(s => s.is_ai).length : 0;
-        const installUrl = \`stremio://\${process.env.RENDER_EXTERNAL_HOSTNAME || "chb-gy3n.onrender.com"}/manifest.json\`;
+        const installUrl = `stremio://${process.env.RENDER_EXTERNAL_HOSTNAME || "chb-gy3n.onrender.com"}/manifest.json`;
 
         let rows = (allData || []).slice(0, 40).map(sub => `
             <tr style="border-bottom: 1px solid #eee;">
-                <td style="padding: 12px;">\${sub.label} <br> <small>\${sub.imdb_id}</small></td>
-                <td style="text-align:center;">\${sub.is_ai ? '🤖 AI' : '🇸🇦 أصلية'}</td>
+                <td style="padding: 12px;">${sub.label} <br> <small>${sub.imdb_id}</small></td>
+                <td style="text-align:center;">${sub.is_ai ? '🤖 AI' : '🇸🇦 أصلية'}</td>
                 <td style="text-align:center;">
-                    <a href="/edit/\${sub.file_id}" style="background:#3498db; color:white; padding:5px 10px; border-radius:5px; text-decoration:none;">تعديل</a>
-                    <a href="/delete/\${sub.file_id}" style="background:#e74c3c; color:white; padding:5px 10px; border-radius:5px; text-decoration:none;">حذف</a>
+                    <a href="/edit/${sub.file_id}" style="background:#3498db; color:white; padding:5px 10px; border-radius:5px; text-decoration:none;">تعديل</a>
+                    <a href="/delete/${sub.file_id}" style="background:#e74c3c; color:white; padding:5px 10px; border-radius:5px; text-decoration:none;">حذف</a>
                 </td>
             </tr>`).join('');
 
-        res.send(\`
+        res.send(`
         <html dir="rtl"><head><meta charset="UTF-8"><title>إدارة AR.SA</title>
         <style>
             body { font-family:sans-serif; background:#f4f7f6; padding:20px; }
@@ -157,8 +157,8 @@ app.get("/stats", async (req, res) => {
             <div style="max-width:900px; margin:auto;">
                 <h1 style="text-align:center;">📊 لوحة تحكم AR.SA</h1>
                 <div style="display:flex; gap:15px; margin-bottom:20px;">
-                    <div class="card" style="flex:1; text-align:center;"><h3>إجمالي</h3><p>\${total}</p></div>
-                    <div class="card" style="flex:1; text-align:center;"><h3>🤖 AI</h3><p>\${aiCount}</p></div>
+                    <div class="card" style="flex:1; text-align:center;"><h3>إجمالي</h3><p>${total}</p></div>
+                    <div class="card" style="flex:1; text-align:center;"><h3>🤖 AI</h3><p>${aiCount}</p></div>
                 </div>
                 <div class="grid">
                     <div class="card">
@@ -179,7 +179,7 @@ app.get("/stats", async (req, res) => {
                 <div class="card">
                     <table style="width:100%; text-align:right;">
                         <thead><tr style="background:#f8f9fa;"><th>المحتوى</th><th>النوع</th><th>الإجراء</th></tr></thead>
-                        <tbody>\${rows}</tbody>
+                        <tbody>${rows}</tbody>
                     </table>
                 </div>
             </div>
@@ -188,11 +188,11 @@ app.get("/stats", async (req, res) => {
                     const q = document.getElementById('q').value;
                     if(q.length < 3) return;
                     fetch('/search-id?q=' + q).then(res => res.json()).then(data => {
-                        document.getElementById('r').innerHTML = data.map(i => \`<div style="padding:5px; cursor:pointer;" onclick="document.getElementById('manual_id').value='\${i.id}'">\${i.l}</div>\`).join('');
+                        document.getElementById('r').innerHTML = data.map(i => '<div style="padding:5px; cursor:pointer;" onclick="document.getElementById(\'manual_id\').value=\'' + i.id + '\'">' + i.l + '</div>').join('');
                     });
                 }
             </script>
-        </body></html>\`);
+        </body></html>`);
     } catch (e) { res.status(500).send("Error"); }
 });
 
@@ -201,7 +201,7 @@ app.get("/stats", async (req, res) => {
  */
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     const { imdbId, label } = req.body;
-    const dbFileId = \`\${imdbId.replace(/:/g, '_')}_manual_\${Date.now()}\`;
+    const dbFileId = `${imdbId.replace(/:/g, '_')}_manual_${Date.now()}`;
     await supabase.from('subtitles').insert([{ 
         file_id: dbFileId, 
         imdb_id: imdbId, 
