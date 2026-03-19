@@ -19,9 +19,9 @@ app.use(express.urlencoded({ limit: '100mb', extended: true }));
  * 2. الاتصال بقاعدة البيانات (MongoDB) مع خيارات الاستقرار المتقدمة
  */
 const dbOptions = {
-    serverSelectionTimeoutMS: 60000, // زيادة المهلة لدقيقة كاملة
+    serverSelectionTimeoutMS: 60000, 
     connectTimeoutMS: 60000,
-    family: 4 // إجبار الموزع على استخدام IPv4 (يحل مشاكل ENOTFOUND غالباً)
+    family: 4 
 };
 
 mongoose.connect(process.env.MONGO_URI, dbOptions)
@@ -54,7 +54,7 @@ app.get("/search-id", async (req, res) => {
 });
 
 /**
- * 5. مسار التعريب المباشر (إصدار البث الآمن للملفات الضخمة)
+ * 5. مسار التعريب المباشر (Streaming Response)
  */
 app.post("/instant-translate", async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
@@ -269,12 +269,12 @@ app.get("/stats", async (req, res) => {
 });
 
 /**
- * 9. مسارات التشغيل
+ * 9. مسارات التشغيل النهائي
  */
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     try {
         let { imdbId, label } = req.body;
-        const dbFileId = \`\${imdbId.replace(/:/g, '_')}_manual_\${Date.now()}\`;
+        const dbFileId = `${imdbId.replace(/:/g, '_')}_manual_${Date.now()}`;
         await Subtitle.create({ fileId: dbFileId, imdbId, arabicText: req.file.buffer.toString('utf8'), label, isAI: false });
         res.redirect('/stats');
     } catch (e) { res.status(500).send(e.message); }
@@ -286,6 +286,7 @@ app.post("/save-edit", async (req, res) => {
 });
 
 app.get("/delete/:fileId", async (req, res) => { await Subtitle.deleteOne({ fileId: req.params.fileId }); res.redirect('/stats'); });
+
 app.get("/sub/:fileId.srt", async (req, res) => {
     const sub = await Subtitle.findOne({ fileId: req.params.fileId.replace('.srt', '') });
     if (sub) { res.setHeader('Content-Type', 'text/plain; charset=utf-8'); res.setHeader('Access-Control-Allow-Origin', '*'); res.send(sub.arabicText); }
