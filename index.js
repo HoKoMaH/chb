@@ -16,13 +16,13 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 /**
- * 2. الاتصال بقاعدة البيانات (MongoDB) - إعدادات الاستقرار القصوى لتجاوز أخطاء الـ IP
+ * 2. الاتصال بقاعدة البيانات (MongoDB Atlas)
+ * ملاحظة: تم حذف directConnection ليتوافق مع الروابط العنقودية (Multi-host)
  */
 const dbOptions = {
     serverSelectionTimeoutMS: 30000,
     connectTimeoutMS: 30000,
     family: 4, 
-    directConnection: true, // إجبار الاتصال لتجاوز مشاكل DNS في Render
     retryWrites: true,
     autoIndex: true
 };
