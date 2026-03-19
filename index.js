@@ -16,13 +16,23 @@ app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
 
 /**
- * 2. الاتصال بقاعدة البيانات (MongoDB)
+ * 2. الاتصال بقاعدة البيانات (MongoDB) مع خيارات الاستقرار
  */
-mongoose.connect(process.env.MONGO_URI)
-    .then(() => console.log("✅ [DATABASE] Connected Successfully"))
-    .catch(err => console.error("❌ [DATABASE] Connection Error:", err));
+const dbOptions = {
+    connectTimeoutMS: 30000, // زيادة وقت محاولة الاتصال لـ 30 ثانية
+    serverSelectionTimeoutMS: 30000,
+};
 
-/**
+mongoose.connect(process.env.MONGO_URI, dbOptions)
+    .then(() => console.log("✅ [DATABASE] Connected Successfully"))
+    .catch(err => {
+        console.error("❌ [DATABASE] Connection Error:", err.message);
+        process.exit(1); // إيقاف التشغيل إذا فشل الاتصال الأساسي
+    });
+
+// لمنع الخطأ الذي ظهر لك (Buffering Timeout)
+mongoose.set('bufferCommands', false);
+
  * 3. تعريف الموديل (Subtitle Schema)
  */
 const SubtitleSchema = new mongoose.Schema({
