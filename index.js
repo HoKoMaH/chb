@@ -22,6 +22,8 @@ const dbOptions = {
     serverSelectionTimeoutMS: 60000, 
     connectTimeoutMS: 60000,
     family: 4 
+    useUint8Array: true, // إضافة هذا الخيار لبعض إصدارات الموزع
+    directConnection: true // إجبار الاتصال المباشر
 };
 
 mongoose.connect(process.env.MONGO_URI, dbOptions)
