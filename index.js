@@ -10,7 +10,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 const app = express();
 
 /**
- * 1. إعدادات استقبال البيانات
+ * 1. إعدادات استقبال البيانات والملفات الضخمة
  */
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
@@ -36,7 +36,7 @@ const SubtitleSchema = new mongoose.Schema({
 const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
 
 /**
- * 4. CSS المطور (الألوان، الوضع الليلي، والـ ID المميز)
+ * 4. CSS المطور (الألوان والوضع الليلي والـ ID)
  */
 const commonCSS = `
 <style>
@@ -55,8 +55,14 @@ const commonCSS = `
     h1, h2, h3 { color: var(--text); }
     
     .imdb-badge {
-        background: var(--imdb-bg); color: var(--imdb-text); padding: 2px 8px; border-radius: 6px;
-        font-family: monospace; font-weight: bold; font-size: 0.85rem; border: 1px solid var(--imdb-bg);
+        background: var(--imdb-bg);
+        color: var(--imdb-text);
+        padding: 2px 8px;
+        border-radius: 6px;
+        font-family: monospace;
+        font-weight: bold;
+        font-size: 0.85rem;
+        border: 1px solid var(--imdb-bg);
     }
 
     input, select, textarea { width: 100%; padding: 12px; margin: 8px 0; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--text); box-sizing: border-box; }
@@ -94,7 +100,7 @@ const nightModeScript = `
 `;
 
 /**
- * 5. المسارات التقنية (Search, Translate, Sync)
+ * 5. المسارات التقنية
  */
 app.get("/search-id", async (req, res) => {
     const query = req.query.q;
@@ -138,7 +144,7 @@ app.post("/adjust-sync", async (req, res) => {
 });
 
 /**
- * 6. واجهة التعديل (Edit Page)
+ * 6. واجهة التعديل (مع زر الإلغاء)
  */
 app.get("/edit/:fileId", async (req, res) => {
     const sub = await Subtitle.findOne({ fileId: req.params.fileId });
@@ -270,7 +276,7 @@ app.get("/stats", async (req, res) => {
                         <input name="imdbId" id="mid" placeholder="tt0000000" required>
                         <div id="sF" style="display:none; gap:10px;"><input type="number" name="season" placeholder="موسم" style="width:50%"><input type="number" name="episode" placeholder="حلقة" style="width:50%"></div>
                         <input name="label" id="mlab" placeholder="اسم النسخة" required>
-                        <input type="file" name="subtitleFile" id="fileInput" accept=".srt" required onchange="extractFileName()">
+                        <input type="file" name="subtitleFile" accept=".srt" required>
                         <button type="submit" class="btn" style="background:#27ae60; width:100%; padding:15px; margin-top:5px;">✅ حفظ الملف</button>
                     </form>
                 </div>
@@ -290,17 +296,6 @@ app.get("/stats", async (req, res) => {
         <button id="nightBtn" onclick="toggleDarkMode()" class="night-toggle">🌙</button>
         ${nightModeScript}
         <script>
-            // وظيفة استخراج اسم النسخة تلقائياً من اسم الملف
-            function extractFileName() {
-                const fileInput = document.getElementById('fileInput');
-                const labelInput = document.getElementById('mlab');
-                if (fileInput.files.length > 0) {
-                    let fileName = fileInput.files[0].name;
-                    // إزالة الامتداد من الاسم
-                    labelInput.value = fileName.replace(/\.[^/.]+$/, "");
-                }
-            }
-
             let t; function autoSearch(){
                 clearTimeout(t); const q=document.getElementById('q').value;
                 if(q.length<2) return;
@@ -314,7 +309,7 @@ app.get("/stats", async (req, res) => {
 });
 
 /**
- * 8. المسارات التقنية للرفع والحفظ والحذف
+ * 8. باقي المسارات (Upload, Delete, Serve)
  */
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     try {
@@ -329,7 +324,7 @@ app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
 app.post("/save-edit", async (req, res) => {
     const isAr = /[\u0600-\u06FF]/.test(req.body.newText);
     await Subtitle.findOneAndUpdate({ fileId: req.body.fileId }, { arabicText: req.body.newText, isAI: !isAr });
-    res.send("<script>alert('تم الحفظ بنجاح!'); window.location.href='/stats';</script>");
+    res.send("<script>alert('تم الحفظ!'); window.location.href='/stats';</script>");
 });
 
 app.get("/delete/:fileId", async (req, res) => { await Subtitle.deleteOne({ fileId: req.params.fileId }); res.redirect('/stats'); });
