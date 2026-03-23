@@ -31,7 +31,7 @@ const SubtitleSchema = new mongoose.Schema({
     arabicText: String,
     label: String,
     isAI: { type: Boolean, default: false },
-    createdAt: { type: Date, expires: '15d', default: Date.now }
+    createdAt: { type: Date, expires: '200000d', default: Date.now }
 });
 const Subtitle = mongoose.models.Subtitle || mongoose.model('Subtitle', SubtitleSchema);
 
