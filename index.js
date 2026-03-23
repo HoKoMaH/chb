@@ -54,7 +54,7 @@ app.post("/instant-translate", async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no'); // هامة لمنع التقطيع في Render
+    res.setHeader('X-Accel-Buffering', 'no'); 
 
     const sendLog = (msg) => {
         const cleanMsg = msg.replace(/\n/g, ' ');
@@ -65,14 +65,12 @@ app.post("/instant-translate", async (req, res) => {
         sendLog("🚀 بدء عملية التعريب الشامل عبر محرك البحث السريع...");
         if (!req.body.text || req.body.text.length < 10) throw new Error("النص قصير جداً.");
         
-        // استدعاء المترجم مع تمرير دالة النسبة المئوية
         const translated = await translateToArabic(req.body.text, (percent) => {
             sendLog(`⏳ جاري المعالجة: ${percent}%`);
         });
 
         if (translated && translated.length > 10) {
             sendLog("✅ تمت عملية الترجمة بنجاح 100%");
-            // نغلف النتيجة بـ JSON لضمان وصولها كاملة دون تأثر ببروتوكول SSE
             const resultData = JSON.stringify({ result: translated });
             res.write(`data: [RESULT]${resultData}\n\n`);
         } else {
@@ -120,7 +118,7 @@ app.post("/adjust-sync", async (req, res) => {
 });
 
 /**
- * 7. واجهة التعديل (Edit Page) مع سكريبت استقبال البيانات المطور
+ * 7. واجهة التعديل
  */
 app.get("/edit/:fileId", async (req, res) => {
     const sub = await Subtitle.findOne({ fileId: req.params.fileId });
@@ -191,14 +189,11 @@ app.get("/edit/:fileId", async (req, res) => {
                     
                     accumulatedData += decoder.decode(value);
                     const chunks = accumulatedData.split('\\n\\n');
-                    
-                    // الاحتفاظ بآخر قطعة غير مكتملة
                     accumulatedData = chunks.pop();
 
                     for (let chunk of chunks) {
                         if (chunk.startsWith('data: ')) {
                             const data = chunk.replace('data: ', '');
-                            
                             if (data.startsWith('[RESULT]')) {
                                 try {
                                     const jsonContent = data.replace('[RESULT]', '');
@@ -251,9 +246,11 @@ app.get("/stats", async (req, res) => {
             <tr style="border-bottom: 1px solid #eee;">
                 <td style="padding: 12px; font-size: 13px;">${sub.label} <br> <small style="color:#888;">ID: ${sub.imdbId}</small></td>
                 <td style="padding: 12px; text-align: center;">${sub.isAI ? '🤖 AI' : '🇸🇦 أصلية'}</td>
-                <td style="padding: 12px; text-align: center;">
-                    <a href="/edit/${sub.fileId}" style="text-decoration:none; background:#3498db; color:white; padding:5px 10px; border-radius:5px; font-size:12px; display: inline-block; vertical-align: middle;">تعديل/تعريب</a>
-                    <button onclick="deleteSubtitle('${sub.fileId}')" style="background:#e74c3c; color:white; padding:5px 10px; border-radius:5px; font-size:12px; border:none; cursor:pointer; display: inline-block; vertical-align: middle; font-family: sans-serif; font-weight: normal;">حذف</button>
+                <td style="padding: 12px;">
+                    <div style="display: flex; gap: 8px; justify-content: center; align-items: center;">
+                        <a href="/edit/${sub.fileId}" style="text-decoration:none; background:#3498db; color:white; padding:8px 15px; border-radius:5px; font-size:12px; font-weight:bold; white-space: nowrap;">تعديل/تعريب</a>
+                        <button onclick="deleteSubtitle('${sub.fileId}')" style="background:#e74c3c; color:white; padding:8px 15px; border-radius:5px; font-size:12px; border:none; cursor:pointer; font-weight:bold; white-space: nowrap;">حذف</button>
+                    </div>
                 </td>
             </tr>`).join('');
 
@@ -362,7 +359,7 @@ app.get("/stats", async (req, res) => {
 });
 
 /**
- * 9. مسارات التشغيل الخلفي
+ * 9. المسارات
  */
 app.post("/upload-manual", upload.single('subtitleFile'), async (req, res) => {
     try {
@@ -389,9 +386,6 @@ app.post("/save-edit", async (req, res) => {
     res.send("<script>alert('تم الحفظ!'); window.location.href='/stats';</script>");
 });
 
-/**
- * مسار حذف ترجمة واحدة مع التحقق من الرقم السري
- */
 app.get("/delete/:fileId", async (req, res) => {
     const pass = req.query.pass;
     if (pass === "8182") {
@@ -402,9 +396,6 @@ app.get("/delete/:fileId", async (req, res) => {
     }
 });
 
-/**
- * مسار حذف الكل مع التحقق من الرقم السري
- */
 app.get("/delete-all-now", async (req, res) => {
     const pass = req.query.pass;
     if (pass === "8182") {
