@@ -337,7 +337,14 @@ app.get("/stats", async (req, res) => {
                     event.currentTarget.style.background = '#e8f4fd';
                 }
                 async function deleteAllSubtitles() {
-                    if(confirm("⚠️ حذف جميع الترجمات؟ لا يمكن التراجع!")) window.location.href = '/delete-all-now';
+                    const password = prompt("⚠️ سيتم حذف جميع الترجمات نهائياً.\\nالرجاء إدخال الرقم السري للتأكيد:");
+                    if (password === "8182") {
+                        if(confirm("هل أنت متأكد فعلاً؟ لا يمكن التراجع!")) {
+                            window.location.href = '/delete-all-now?pass=' + password;
+                        }
+                    } else if (password !== null) {
+                        alert("❌ الرقم السري خاطئ!");
+                    }
                 }
             </script>
         </body></html>`);
@@ -373,7 +380,19 @@ app.post("/save-edit", async (req, res) => {
 });
 
 app.get("/delete/:fileId", async (req, res) => { await Subtitle.deleteOne({ fileId: req.params.fileId }); res.redirect('/stats'); });
-app.get("/delete-all-now", async (req, res) => { await Subtitle.deleteMany({}); res.redirect('/stats'); });
+
+/**
+ * مسار حذف الكل مع التحقق من الرقم السري
+ */
+app.get("/delete-all-now", async (req, res) => {
+    const pass = req.query.pass;
+    if (pass === "8182") {
+        await Subtitle.deleteMany({});
+        res.send("<script>alert('✅ تم مسح القاعدة بالكامل'); window.location.href='/stats';</script>");
+    } else {
+        res.status(403).send("<h1>❌ غير مصرح لك: الرقم السري خاطئ</h1>");
+    }
+});
 
 app.get("/sub/:fileId.srt", async (req, res) => {
     const sub = await Subtitle.findOne({ fileId: req.params.fileId.replace('.srt', '') });
