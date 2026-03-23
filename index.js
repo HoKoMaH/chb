@@ -192,6 +192,7 @@ app.get("/edit/:fileId", async (req, res) => {
                     accumulatedData += decoder.decode(value);
                     const chunks = accumulatedData.split('\\n\\n');
                     
+                    // الاحتفاظ بآخر قطعة غير مكتملة
                     accumulatedData = chunks.pop();
 
                     for (let chunk of chunks) {
@@ -251,8 +252,8 @@ app.get("/stats", async (req, res) => {
                 <td style="padding: 12px; font-size: 13px;">${sub.label} <br> <small style="color:#888;">ID: ${sub.imdbId}</small></td>
                 <td style="padding: 12px; text-align: center;">${sub.isAI ? '🤖 AI' : '🇸🇦 أصلية'}</td>
                 <td style="padding: 12px; text-align: center;">
-                    <a href="/edit/${sub.fileId}" style="text-decoration:none; background:#3498db; color:white; padding:5px 10px; border-radius:5px; font-size:12px;">تعديل/تعريب</a>
-                    <button onclick="deleteSubtitle('${sub.fileId}')" style="background:#e74c3c; color:white; padding:5px 10px; border-radius:5px; font-size:12px; border:none; cursor:pointer;">حذف</button>
+                    <a href="/edit/${sub.fileId}" style="text-decoration:none; background:#3498db; color:white; padding:5px 10px; border-radius:5px; font-size:12px; display: inline-block; vertical-align: middle;">تعديل/تعريب</a>
+                    <button onclick="deleteSubtitle('${sub.fileId}')" style="background:#e74c3c; color:white; padding:5px 10px; border-radius:5px; font-size:12px; border:none; cursor:pointer; display: inline-block; vertical-align: middle; font-family: sans-serif; font-weight: normal;">حذف</button>
                 </td>
             </tr>`).join('');
 
